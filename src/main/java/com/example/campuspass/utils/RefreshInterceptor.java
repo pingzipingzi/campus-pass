@@ -1,10 +1,12 @@
 package com.example.campuspass.utils;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.jwt.JWTException;
+import cn.hutool.json.JSONUtil;
 import com.example.campuspass.entity.User;
-import io.jsonwebtoken.Claims;
+import com.example.campuspass.vo.UserVO;
+import io.jsonwebtoken.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -21,9 +23,13 @@ import static com.example.campuspass.utils.RedisConstants.LOGIN_TTL;
 public class RefreshInterceptor implements HandlerInterceptor {
     public static final ThreadLocal<User> USER_THREAD_LOCAL = new ThreadLocal<>();
 
+    private final JwtUtils jwtUtils ;
+
+
     private final StringRedisTemplate stringRedisTemplate;
-    public RefreshInterceptor(StringRedisTemplate stringRedisTemplate){
+    public RefreshInterceptor(StringRedisTemplate stringRedisTemplate,JwtUtils jwtUtils){
         this.stringRedisTemplate = stringRedisTemplate;
+        this.jwtUtils=jwtUtils;
     }
 
     @Override
@@ -33,25 +39,55 @@ public class RefreshInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        String jwtToken = request.getHeader("Authorization");
+        String header = request.getHeader("Authorization");
+        if (StrUtil.isBlank(header) || !header.startsWith("Bearer ") || header.length() < 8) {
+            return true;
+        }
+        String jwtToken = header.substring(7);
+        if (StrUtil.isBlank(jwtToken)) {
+            return true;
+        }
         Claims claim = null;
         try {
-            claim = JwtUtils.parseToken(jwtToken);
-        } catch (JWTException e) {
+            claim = jwtUtils.parseToken(jwtToken);
+        } catch (Exception e) {
             log.error("JWT签名不匹配或已过期", e);
             return true;
         }
-        String token = claim.get("token",String.class);
+
+        String sessionId=claim.get("sid",String.class);
+        if (sessionId == null || !sessionId.matches(
+                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
+            return true;
+            // 按无效登录凭据处理，不继续访问 Redis
+        }
+        String token ="login:status:"+sessionId;
         if (StrUtil.isBlank(token)) {
             return true;
         }
-        Map<Object, Object> map = stringRedisTemplate.opsForHash().entries(token);
-        if(map.isEmpty()){
+        String sessionJson = stringRedisTemplate.opsForValue().get(token);
+        if (StrUtil.isBlank(sessionJson)) {
             return true;
         }
-        User user = BeanUtil.fillBeanWithMap(map, new User(), false);
-        USER_THREAD_LOCAL.set(user);
-        stringRedisTemplate.expire(token, Duration.ofMinutes(LOGIN_TTL));
+        UserVO userVO = JSONUtil.toBean(sessionJson, UserVO.class);
+        if (userVO == null
+                || userVO.getUserId() == null
+                || userVO.getUserId() <= 0) {
+            return true;
+        }
+        Boolean isSuccess = stringRedisTemplate.expire(token, Duration.ofMinutes(LOGIN_TTL));
+        if (!BooleanUtil.isTrue(isSuccess)) {
+            return true;
+        }
+        try {
+            User user = BeanUtil.copyProperties(userVO, User.class);
+            USER_THREAD_LOCAL.set(user);
+        } catch (Exception e) {
+            log.error(e.toString());
+            USER_THREAD_LOCAL.remove();
+        }
         return true;
     }
+
+
 }

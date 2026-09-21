@@ -3,22 +3,24 @@ server:
 spring:
   application:
     name: campus-pass
-    datasource:
+  datasource:
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: ${MYSQL_URL}
       username: ${MYSQL_USERNAME}
       password: ${MYSQL_PASSWORD}
-    data:
+  data:
       redis:
         host: ${REDIS_HOST}
         port: 6379
-    jackson:
-      default-property-inclusion: non_null#json处理忽略非空字段
+  jackson:
+      default-property-inclusion: non_null #json处理忽略空字段
 mybatis-plus:
   type-aliases-package: com.example.campuspass.entity #类型别名，使用xml不用导全类名
 logging:
   level:
-    com.example.:debug
+    com.example.campuspass: debug
 
-
+campus-pass:
+  jwt:
+    secret-base64: ${CAMPUS_PASS_JWT_SECRET}
 

@@ -13,10 +13,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleException(Exception e){
-        String message = e.getMessage();
-        log.error("未加入异常处理器的异常", e);
+        log.error("未加入异常处理器的异常",e);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Result.fail(40000, message));
+                .body(Result.fail(40000, "出现异常"));
     }
 
     @ExceptionHandler(BusinessException.class)
@@ -24,7 +23,7 @@ public class GlobalExceptionHandler {
         String message = e.getMessage();
         Integer code = e.getCode();
         HttpStatus httpStatus = e.getHttpStatus();
-        log.error("用户输入格式有误", e);
+        log.error("出现异常",e);
         return ResponseEntity.status(httpStatus)
                 .body(
                         Result.fail(
@@ -36,13 +35,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Result<Void>> handleMethodArgumentNotValidException(MethodArgumentNotValidException e) {
-        String message= e.getMessage();
-        log.error("传入数据非法",e);
+        log.warn("输入数据非法");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(
                         Result.fail(
                                 40000,
-                                message
+                                "传入数据非法"
                         )
                 );
     }

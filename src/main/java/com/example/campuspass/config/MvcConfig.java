@@ -1,5 +1,6 @@
 package com.example.campuspass.config;
 
+import com.example.campuspass.utils.JwtUtils;
 import com.example.campuspass.utils.OuterInterceptor;
 import com.example.campuspass.utils.RefreshInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,9 @@ public class MvcConfig implements WebMvcConfigurer {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
+    @Autowired
+    private JwtUtils jwtUtils;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new OuterInterceptor())
@@ -22,7 +26,7 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/auth/**"
                 ).order(1);
 
-        registry.addInterceptor(new RefreshInterceptor(stringRedisTemplate)).addPathPatterns("/**").order(0);
+        registry.addInterceptor(new RefreshInterceptor(stringRedisTemplate,jwtUtils)).addPathPatterns("/**").order(0);
     }
 
 }

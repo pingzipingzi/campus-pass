@@ -36,7 +36,7 @@ public class AuthController {
     }
 
     @PostMapping("/signup")
-    public Result<Void> signUp(@RequestBody SignUpDTO signUpDTO) {
+    public Result<Void> signUp(@Valid @RequestBody SignUpDTO signUpDTO) {
         return authService.signUp(signUpDTO);
     }
 

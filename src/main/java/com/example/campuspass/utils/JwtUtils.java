@@ -1,39 +1,44 @@
 package com.example.campuspass.utils;
 
-import cn.hutool.jwt.JWTUtil;
+
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.Map;
 
+@Component
 public class JwtUtils {
 
-    private static final String SECRET = "campus-pass-jwt-secret-key-012345678998765543210";
 
     private static final Long EXPIRE_MILLIS = 7 * 24 * 60 * 60 * 1000L;
 
-    private static final SecretKey KEY = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+    private final SecretKey key;
 
-    private JwtUtils(){
+
+    public JwtUtils(@Value("${campus-pass.jwt.secret-base64}")String secretBase64){
+        this.key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(secretBase64));
     }
 
-    public static String generateToken(Map<String,Object> claims){
+    public String generateToken(Map<String,Object> claims){
         long now = System.currentTimeMillis();
         return Jwts.builder()
                 .claims(claims)
                 .issuedAt(new Date(now))
                 .expiration(new Date(now + EXPIRE_MILLIS))
-                .signWith(KEY)
+                .signWith(key,Jwts.SIG.HS256)
                 .compact();
     }
 
-    public static Claims parseToken(String token) {
+    public Claims parseToken(String token) {
         return Jwts.parser()
-                .verifyWith(KEY)
+                .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
