@@ -1,11 +1,24 @@
 package com.example.campuspass.vo;
 
 import lombok.Data;
-import lombok.experimental.Accessors;
+
+import java.time.LocalDateTime;
 
 @Data
-@Accessors(chain=true)
 public class UserVO {
+
     private Long userId;
+
     private String userName;
+
+    private String studentId;
+
+    private String phone;
+
+    private Integer role;
+
+    private Integer status;
+
+    private LocalDateTime createTime;
+
 }

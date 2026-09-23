@@ -7,7 +7,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
-public class OuterInterceptor implements HandlerInterceptor {
+public class InnerInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         User user = USER_THREAD_LOCAL.get();

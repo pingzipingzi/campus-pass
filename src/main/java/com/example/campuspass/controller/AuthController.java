@@ -4,21 +4,21 @@ import com.example.campuspass.dto.CodeLoginDTO;
 import com.example.campuspass.dto.PasswordLoginDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.dto.SignUpDTO;
-import com.example.campuspass.entity.User;
+import com.example.campuspass.service.IAuthService;
 import com.example.campuspass.service.impl.AuthServiceImpl;
 import com.example.campuspass.vo.LoginVO;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.http.HttpRequest;
-
+@Tag(name="登录管理",description = "登录相关操作")
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
     @Autowired
-    private AuthServiceImpl authService;
+    private IAuthService authService;
 
     @PostMapping("/code")
     public Result<Void> sendCode( @RequestParam("phone")String phone) {
@@ -26,12 +26,12 @@ public class AuthController {
     }
 
     @PostMapping("/login/code")
-    public Result<String> loginWithCode(@Valid @RequestBody CodeLoginDTO codeLoginDTO) {
+    public Result<LoginVO> loginWithCode(@Valid @RequestBody CodeLoginDTO codeLoginDTO) {
         return authService.loginWithCode(codeLoginDTO);
     }
 
     @PostMapping("/login/password")
-    public Result<String> loginWithPassword(@Valid @RequestBody PasswordLoginDTO passwordLoginDTO) {
+    public Result<LoginVO> loginWithPassword(@Valid @RequestBody PasswordLoginDTO passwordLoginDTO) {
         return authService.loginWithPassword(passwordLoginDTO);
     }
 

@@ -5,7 +5,8 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.example.campuspass.entity.User;
-import com.example.campuspass.vo.UserVO;
+import com.example.campuspass.dto.UserDTO;
+import com.example.campuspass.service.IUserService;
 import io.jsonwebtoken.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,7 +16,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.time.Duration;
-import java.util.Map;
 
 import static com.example.campuspass.utils.RedisConstants.LOGIN_TTL;
 
@@ -24,12 +24,15 @@ public class RefreshInterceptor implements HandlerInterceptor {
     public static final ThreadLocal<User> USER_THREAD_LOCAL = new ThreadLocal<>();
 
     private final JwtUtils jwtUtils ;
-
+    
+    private IUserService userService;
+            
 
     private final StringRedisTemplate stringRedisTemplate;
-    public RefreshInterceptor(StringRedisTemplate stringRedisTemplate,JwtUtils jwtUtils){
+    public RefreshInterceptor(StringRedisTemplate stringRedisTemplate,JwtUtils jwtUtils,IUserService userService){
         this.stringRedisTemplate = stringRedisTemplate;
         this.jwtUtils=jwtUtils;
+        this.userService=userService;
     }
 
     @Override
@@ -37,6 +40,8 @@ public class RefreshInterceptor implements HandlerInterceptor {
         USER_THREAD_LOCAL.remove();
     }
 
+
+    //以后改
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String header = request.getHeader("Authorization");
@@ -69,19 +74,30 @@ public class RefreshInterceptor implements HandlerInterceptor {
         if (StrUtil.isBlank(sessionJson)) {
             return true;
         }
-        UserVO userVO = JSONUtil.toBean(sessionJson, UserVO.class);
-        if (userVO == null
-                || userVO.getUserId() == null
-                || userVO.getUserId() <= 0) {
+        UserDTO userDTO = JSONUtil.toBean(sessionJson, UserDTO.class);
+        if (userDTO == null
+                || userDTO.getUserId() == null
+                || userDTO.getUserId() <= 0) {
             return true;
         }
+        User currentUser = userService.lambdaQuery()
+                .eq(User::getUserId, userDTO.getUserId())
+                .select(User::getUserId, User::getUserName,
+                        User::getRole, User::getStatus)
+                .one();
+
+        if (currentUser == null
+                || !Integer.valueOf(0).equals(currentUser.getStatus())) {
+            stringRedisTemplate.delete(token);
+            return true;
+        }
+
         Boolean isSuccess = stringRedisTemplate.expire(token, Duration.ofMinutes(LOGIN_TTL));
         if (!BooleanUtil.isTrue(isSuccess)) {
             return true;
         }
         try {
-            User user = BeanUtil.copyProperties(userVO, User.class);
-            USER_THREAD_LOCAL.set(user);
+            USER_THREAD_LOCAL.set(currentUser);
         } catch (Exception e) {
             log.error(e.toString());
             USER_THREAD_LOCAL.remove();

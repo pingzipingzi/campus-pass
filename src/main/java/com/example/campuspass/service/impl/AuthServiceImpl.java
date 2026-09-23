@@ -1,8 +1,6 @@
 package com.example.campuspass.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.bean.copier.CopyOptions;
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.example.campuspass.dto.CodeLoginDTO;
@@ -17,11 +15,11 @@ import com.example.campuspass.utils.JwtUtils;
 import com.example.campuspass.utils.LimitRateUtils;
 import com.example.campuspass.utils.RegexUtils;
 import com.example.campuspass.utils.VerifyCodeUtils;
-import com.example.campuspass.vo.UserVO;
+import com.example.campuspass.dto.UserDTO;
+import com.example.campuspass.vo.LoginVO;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.NonNull;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
@@ -31,9 +29,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import javax.print.attribute.HashAttributeSet;
-import java.net.http.HttpRequest;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.*;
 
@@ -80,7 +75,7 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     @Override
-    public Result<String> loginWithPassword(PasswordLoginDTO passwordLoginDTO) {
+    public Result<LoginVO> loginWithPassword(PasswordLoginDTO passwordLoginDTO) {
         String password = passwordLoginDTO.getPassword();
         String phone = passwordLoginDTO.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
@@ -97,8 +92,8 @@ public class AuthServiceImpl implements IAuthService {
             throw new BusinessException(40000, "手机号或密码有误", HttpStatus.BAD_REQUEST);
         }
         String token = getToken(user);
-        
-        return Result.ok(token);
+
+        return Result.ok(new LoginVO(token, user.getUserId(), user.getUserName(), user.getRole()));
 
     }
 
@@ -165,7 +160,7 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     @Override
-    public Result<String> loginWithCode(CodeLoginDTO codeLoginDTO) {
+    public Result<LoginVO> loginWithCode(CodeLoginDTO codeLoginDTO) {
         String code=codeLoginDTO.getCode();
         String phone=codeLoginDTO.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
@@ -183,7 +178,7 @@ public class AuthServiceImpl implements IAuthService {
             throw new BusinessException(40000, "手机号或验证码有误", HttpStatus.BAD_REQUEST);
         }
         String token = getToken(user);
-        return Result.ok(token);
+        return Result.ok(new LoginVO(token, user.getUserId(), user.getUserName(), user.getRole()));
 
     }
 
@@ -202,8 +197,8 @@ public class AuthServiceImpl implements IAuthService {
         if(user.getStatus()==1){
             throw new BusinessException(40000, "账号已被禁用", HttpStatus.BAD_REQUEST);
         }
-        UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
-        String jsonStr = JSONUtil.toJsonStr(userVO);
+        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        String jsonStr = JSONUtil.toJsonStr(userDTO);
         String sessionId=UUID.randomUUID().toString();
         String redisKey="login:status:" + sessionId;
         stringRedisTemplate.opsForValue().set(redisKey, jsonStr, Duration.ofMinutes(LOGIN_TTL));
