@@ -1,4 +1,4 @@
-package com.example.campuspass.utils;
+package com.example.campuspass.utils.enums;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

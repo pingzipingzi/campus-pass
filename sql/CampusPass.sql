@@ -49,11 +49,11 @@ create table tb_registration
     user_id         bigint unsigned                            not null comment '用户id',
     create_time     datetime         default CURRENT_TIMESTAMP null comment '创建时间',
     update_time     datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
-    status          tinyint unsigned default '0'               not null comment '报名状态：0成功，1已取消',
+    status          tinyint unsigned default '0'               not null comment '报名状态：0成功，1已取消，2候补中，3已失效',
     constraint uk_activity_user
         unique (activity_id, user_id),
     constraint chk_registration_status
-        check (`status` in (0, 1))
+        check (`status` in (0, 1, 2, 3))
 )
     comment '报名表';
 

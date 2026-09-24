@@ -6,18 +6,23 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.campuspass.dto.ActivityDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.entity.Activity;
+import com.example.campuspass.entity.Registration;
 import com.example.campuspass.entity.User;
+import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.ActivityMapper;
 import com.example.campuspass.service.IActivityService;
+import com.example.campuspass.service.IRegistrationService;
 import com.example.campuspass.service.IUserService;
-import com.example.campuspass.utils.ActivityTypeEnum;
+import com.example.campuspass.service.IWaitListService;
+import com.example.campuspass.utils.enums.ActivityTypeEnum;
 import com.example.campuspass.vo.ActivityPageVO;
 import com.example.campuspass.vo.ActivityVO;
 import com.example.campuspass.vo.PageResultVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +35,12 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
 
     @Autowired
     private IUserService userService;
+
+    @Autowired
+    private IRegistrationService registrationService;
+
+    @Autowired
+    private IWaitListService waitListService;
 
     @Override
     public Result<Void> createActivity(ActivityDTO activityDTO) {
@@ -99,10 +110,15 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
+    @Transactional
     public Result<Void> cancelActivity(Long activityId) {
         checkUserID(activityId);
         boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getStatus, 2L).update();
-        if (!success) {
+        boolean success1 = waitListService.lambdaUpdate().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0)
+                .set(WaitList::getStatus, 3).update();
+        registrationService.lambdaUpdate().eq(Registration::getActivityId, activityId)
+                .in(Registration::getStatus, 0, 2).set(Registration::getStatus, 3).update();
+        if (!success||!success1) {
             throw new BusinessException(40000, "更新失败", HttpStatus.BAD_REQUEST);
         }
         return Result.ok();
@@ -124,7 +140,6 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
 
     @Override
     public Result<ActivityVO> getMyActivityDetail(Long activityId) {
-        User user = USER_THREAD_LOCAL.get();
         Activity activity = checkUserID(activityId);
 
         String activityTypeName = ActivityTypeEnum.getDescription(activity.getActivityType());
@@ -146,10 +161,16 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
+    @Transactional
     public Result<Void> forceCancelActivityForAdmin(Long activityId) {
         checkIfAdmin();
         boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getStatus, 2).update();
-        if(!success){
+        boolean success1 = waitListService.lambdaUpdate().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0)
+                .set(WaitList::getStatus, 3).update();
+        registrationService.lambdaUpdate().eq(Registration::getActivityId, activityId)
+                .in(Registration::getStatus, 0, 2).set(Registration::getStatus, 3).update();
+
+        if(!success||!success1){
             throw new BusinessException(40000, "数据更新失败", HttpStatus.BAD_REQUEST);
         }
         return Result.ok();

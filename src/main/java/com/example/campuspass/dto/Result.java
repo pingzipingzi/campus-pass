@@ -20,9 +20,12 @@ public class Result<T>{
         return new Result<>(0, "success", data);
     }
 
+    public static Result<Void> ok(String message){
+        return new Result<>(0, message, null);
+    }
 
     public static <T>Result<T> fail(Integer code,String message){
         return new Result<>(code, message, null);
-
     }
+
 }
