@@ -3,6 +3,7 @@ package com.example.campuspass.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.campuspass.dto.ActivityDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.entity.Activity;
@@ -12,9 +13,9 @@ import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.ActivityMapper;
 import com.example.campuspass.service.IActivityService;
-import com.example.campuspass.service.IRegistrationService;
-import com.example.campuspass.service.IUserService;
-import com.example.campuspass.service.IWaitListService;
+import com.example.campuspass.mapper.RegistrationMapper;
+import com.example.campuspass.mapper.WaitListMapper;
+import com.example.campuspass.service.support.ActivityMutationGuard;
 import com.example.campuspass.utils.enums.ActivityTypeEnum;
 import com.example.campuspass.vo.ActivityPageVO;
 import com.example.campuspass.vo.ActivityVO;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,13 +36,13 @@ import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> implements IActivityService {
 
     @Autowired
-    private IUserService userService;
+    private ActivityMutationGuard mutationGuard;
 
     @Autowired
-    private IRegistrationService registrationService;
+    private RegistrationMapper registrationMapper;
 
     @Autowired
-    private IWaitListService waitListService;
+    private WaitListMapper waitListMapper;
 
     @Override
     public Result<Void> createActivity(ActivityDTO activityDTO) {
@@ -90,8 +92,10 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> publishActivity(Long activityId) {
-        Activity activity = checkUserID(activityId);
+        Activity activity = mutationGuard.lock(activityId);
+        checkOwner(activity);
         if (!activity.getStatus().equals(0)) {
             throw new BusinessException(40000, "活动处于非草稿状态", HttpStatus.BAD_REQUEST);
         }
@@ -110,17 +114,11 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> cancelActivity(Long activityId) {
-        checkUserID(activityId);
-        boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getStatus, 2L).update();
-        boolean success1 = waitListService.lambdaUpdate().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0)
-                .set(WaitList::getStatus, 3).update();
-        registrationService.lambdaUpdate().eq(Registration::getActivityId, activityId)
-                .in(Registration::getStatus, 0, 2).set(Registration::getStatus, 3).update();
-        if (!success||!success1) {
-            throw new BusinessException(40000, "更新失败", HttpStatus.BAD_REQUEST);
-        }
+        Activity activity = mutationGuard.lock(activityId);
+        checkOwner(activity);
+        cancelLockedActivity(activity);
         return Result.ok();
     }
 
@@ -161,19 +159,30 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> forceCancelActivityForAdmin(Long activityId) {
         checkIfAdmin();
-        boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getStatus, 2).update();
-        boolean success1 = waitListService.lambdaUpdate().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0)
-                .set(WaitList::getStatus, 3).update();
-        registrationService.lambdaUpdate().eq(Registration::getActivityId, activityId)
-                .in(Registration::getStatus, 0, 2).set(Registration::getStatus, 3).update();
-
-        if(!success||!success1){
-            throw new BusinessException(40000, "数据更新失败", HttpStatus.BAD_REQUEST);
-        }
+        cancelLockedActivity(mutationGuard.lock(activityId));
         return Result.ok();
+    }
+
+    private void cancelLockedActivity(Activity activity) {
+        if (activity.getStatus() == 2) {
+            return;
+        }
+        boolean success = lambdaUpdate().eq(Activity::getActivityId, activity.getActivityId())
+                .set(Activity::getStatus, 2).set(Activity::getRemainingCapacity, activity.getTotalCapacity())
+                .update();
+        if (!success) {
+            throw new BusinessException(40000, "活动取消失败", HttpStatus.BAD_REQUEST);
+        }
+        // 没有报名或候补时更新零行是正常情况；SQL 异常仍会使整个事务回滚。
+        waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                .eq(WaitList::getActivityId, activity.getActivityId()).eq(WaitList::getStatus, 0)
+                .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
+        registrationMapper.update(null, Wrappers.<Registration>lambdaUpdate()
+                .eq(Registration::getActivityId, activity.getActivityId()).eq(Registration::getStatus, 0)
+                .set(Registration::getStatus, 2));
     }
 
     public static void checkIfAdmin() {
@@ -184,8 +193,10 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> updateActivityDraft(ActivityDTO activityDTO,Long activityId) {
-        Activity activity = checkUserID(activityId);
+        Activity activity = mutationGuard.lock(activityId);
+        checkOwner(activity);
         if (!activity.getStatus().equals(0)) {
             throw new BusinessException(40000, "活动处于非草稿状态", HttpStatus.BAD_REQUEST);
         }
@@ -217,9 +228,17 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         if(activity==null){
             throw new BusinessException(40000, "活动不存在", HttpStatus.BAD_REQUEST);
         }
+        checkOwner(activity);
+        return activity;
+    }
+
+    private void checkOwner(Activity activity) {
+        User user = USER_THREAD_LOCAL.get();
+        if (user == null) {
+            throw new BusinessException(40000, "用户未登录", HttpStatus.BAD_REQUEST);
+        }
         if (!activity.getCreatorId().equals(user.getUserId())) {
             throw new BusinessException(40000, "登录用户与创建活动用户不匹配", HttpStatus.BAD_REQUEST);
         }
-        return activity;
     }
 }

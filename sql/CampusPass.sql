@@ -49,11 +49,11 @@ create table tb_registration
     user_id         bigint unsigned                            not null comment '用户id',
     create_time     datetime         default CURRENT_TIMESTAMP null comment '创建时间',
     update_time     datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
-    status          tinyint unsigned default '0'               not null comment '报名状态：0成功，1已取消，2候补中，3已失效',
+    status          tinyint unsigned default '0'               not null comment '报名状态：0成功，1已取消，2已失效；候补仅记录在候补表',
     constraint uk_activity_user
         unique (activity_id, user_id),
     constraint chk_registration_status
-        check (`status` in (0, 1, 2, 3))
+        check (`status` in (0, 1, 2))
 )
     comment '报名表';
 
@@ -92,8 +92,8 @@ create table tb_wait_list
     activity_id   bigint unsigned                            not null comment '活动id',
     user_id       bigint unsigned                            not null comment '用户id',
     status        tinyint unsigned default '0'               not null comment '候补状态：0候补中，1已转正，2已取消，3已失效',
-    join_time     datetime         default CURRENT_TIMESTAMP not null comment '加入候补时间',
-    promoted_time datetime                                   null comment '候补成功时间',
+    join_time     datetime(6)      default CURRENT_TIMESTAMP(6) not null comment '本次加入候补时间，重新加入时刷新',
+    promoted_time datetime(6)                                   null comment '候补成功时间',
     create_time   datetime         default CURRENT_TIMESTAMP null comment '创建时间',
     update_time   datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
     constraint un_activity_user
@@ -107,7 +107,7 @@ create table tb_wait_list
     comment '候补表';
 
 create index idx_activity_status_join_time
-    on tb_wait_list (activity_id, status, join_time);
+    on tb_wait_list (activity_id, status, join_time, wait_id);
 
 create index idx_wait_user_id
     on tb_wait_list (user_id);

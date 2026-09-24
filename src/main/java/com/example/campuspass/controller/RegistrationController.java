@@ -5,11 +5,13 @@ import com.example.campuspass.service.IRegistrationService;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.RegistrationVO;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/registration")
+@Tag(name="报名表管理")
 public class RegistrationController {
 
     @Autowired

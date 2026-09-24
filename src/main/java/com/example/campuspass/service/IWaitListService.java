@@ -10,4 +10,6 @@ public interface IWaitListService extends IService<WaitList> {
     Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages);
 
     Result<Void> cancelWaitList(Long activityId);
+
+    void expireForActivity(Long activityId);
 }

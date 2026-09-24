@@ -3,6 +3,9 @@ package com.example.campuspass.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.example.campuspass.entity.Activity;
+import com.example.campuspass.service.support.ActivityMutationGuard;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.entity.User;
 import com.example.campuspass.entity.WaitList;
@@ -15,8 +18,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
@@ -25,9 +30,15 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
 
     private static final Integer WAIT_LIST_PAGE_SIZE=10;
 
+    @Autowired
+    private ActivityMutationGuard mutationGuard;
+
 
     @Override
     public Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages) {
+        if (pages == null || pages < 1) {
+            throw new BusinessException(40000, "页码必须大于零", HttpStatus.BAD_REQUEST);
+        }
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
         User user = USER_THREAD_LOCAL.get();
         Page<WaitList> result = lambdaQuery().eq(WaitList::getUserId, user.getUserId()).orderByDesc(WaitList::getWaitId).page(page);
@@ -39,19 +50,35 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> cancelWaitList(Long activityId) {
         Long userId = USER_THREAD_LOCAL.get().getUserId();
+        Activity activity = mutationGuard.lock(activityId);
         WaitList one = lambdaQuery().eq(WaitList::getUserId, userId).eq(WaitList::getActivityId, activityId).one();
         if(one==null||one.getStatus()!=0){
             throw new BusinessException(40000, "您目前未处于候补状态", HttpStatus.BAD_REQUEST);
         }
+        boolean expired = activity.getStatus() == 2
+                || !LocalDateTime.now().isBefore(activity.getRegistrationEndTime());
         boolean success = lambdaUpdate().eq(WaitList::getUserId, userId).eq(WaitList::getActivityId, activityId)
-                .eq(WaitList::getStatus, 0).set(WaitList::getStatus, 2).update();
+                .eq(WaitList::getStatus, 0).set(WaitList::getStatus, expired ? 3 : 2)
+                .set(WaitList::getPromotedTime, null).update();
 
         if (!success) {
             throw new BusinessException(40000, "数据更新失败", HttpStatus.BAD_REQUEST);
         }
         return Result.ok();
+    }
+
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void expireForActivity(Long activityId) {
+        Activity activity = mutationGuard.lock(activityId);
+        if (activity.getStatus() == 2
+                || !LocalDateTime.now().isBefore(activity.getRegistrationEndTime())) {
+            baseMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                    .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
+                    .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
+        }
     }
 }
