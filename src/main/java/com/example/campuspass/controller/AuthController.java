@@ -1,9 +1,6 @@
 package com.example.campuspass.controller;
 
-import com.example.campuspass.dto.CodeLoginDTO;
-import com.example.campuspass.dto.PasswordLoginDTO;
-import com.example.campuspass.dto.Result;
-import com.example.campuspass.dto.SignUpDTO;
+import com.example.campuspass.dto.*;
 import com.example.campuspass.service.IAuthService;
 import com.example.campuspass.service.impl.AuthServiceImpl;
 import com.example.campuspass.vo.LoginVO;
@@ -43,5 +40,10 @@ public class AuthController {
     @PostMapping("logout")
     public Result<Void> logOut(HttpServletRequest request){
         return authService.logOut(request);
+    }
+
+    @PutMapping("/password/forget")
+    public Result<Void> forgetPassword(@Valid @RequestBody ForgetPasswordDTO forgetPasswordDTO) {
+        return authService.forgetPassword(forgetPasswordDTO);
     }
 }

@@ -1,5 +1,6 @@
 package com.example.campuspass.dto;
 
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -8,6 +9,7 @@ import java.time.LocalDateTime;
 @Data
 @Accessors(chain=true)
 public class UserDTO {
+
     private Long userId;
 
     private String userName;
@@ -19,5 +21,9 @@ public class UserDTO {
     private String phone;
 
     private Integer status;
+
+    private LocalDateTime createTime;
+
+    private Long authVersion;
 
 }

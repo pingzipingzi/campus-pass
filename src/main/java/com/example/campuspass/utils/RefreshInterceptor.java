@@ -18,6 +18,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.time.Duration;
 import java.util.Map;
 
+import static com.example.campuspass.utils.RedisConstants.LOGIN_STATUS_KEY_PREFIX;
+import static com.example.campuspass.utils.RedisConstants.USER_CACHE_KEY_PREFIX;
+import static com.example.campuspass.utils.RedisConstants.USER_CACHE_TTL_SECONDS;
 import static com.example.campuspass.utils.RedisConstants.LOGIN_TTL;
 
 @Slf4j
@@ -67,18 +70,24 @@ public class RefreshInterceptor implements HandlerInterceptor {
 
         String sessionId=claim.get("sid",String.class);
         if (sessionId == null || !sessionId.matches(
-                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
+                "^[0-9]+&[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
             return true;
             // 按无效登录凭据处理，不继续访问 Redis
         }
-        String token ="login:status:"+sessionId;
+        String token =LOGIN_STATUS_KEY_PREFIX+sessionId;
+        Long authVersion = null;
+        try {
+            authVersion = Long.valueOf(sessionId.substring(0, sessionId.indexOf('&')));
+        } catch (NumberFormatException e) {
+            return true;
+        }
 
         String userId = stringRedisTemplate.opsForValue().get(token);
         if (StrUtil.isBlank(userId)) {
             return true;
         }
 
-        String keyForUser = "user:user-id:" + userId;
+        String keyForUser = USER_CACHE_KEY_PREFIX + userId;
         Map<Object, Object> map = stringRedisTemplate.opsForHash().entries(keyForUser);
 
         UserDTO userDTO = null;
@@ -88,24 +97,31 @@ public class RefreshInterceptor implements HandlerInterceptor {
                     .eq(User::getUserId, userId)
                     .one();
             if (user == null
-                    || !Integer.valueOf(0).equals(user.getStatus())) {
+                    || !Integer.valueOf(0).equals(user.getStatus())
+                    ||user.getAuthVersion()==null
+                    ||!authVersion.equals(user.getAuthVersion())) {
                 stringRedisTemplate.delete(token);
                 return true;
             }
             userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-            try {
-                executeSaveHashMapLua.executeScript(BeanUtil.beanToMap(userDTO), keyForUser, 2 * 60L);
-            } catch (Exception e) {
-                log.error("执行脚本失败", e);
-                return true;
-            }
+            if (executeScriptSaveHash(userDTO, keyForUser)) return true;
         }else {
 
             userDTO = BeanUtil.fillBeanWithMap(map, new UserDTO(), false);
-            if (userDTO.getStatus() == null ||
-                    !Integer.valueOf(0).equals(userDTO.getStatus())) {
-                stringRedisTemplate.delete(token);
-                return true;
+
+            if (userDTO.getAuthVersion() == null||
+                    !Integer.valueOf(0).equals(userDTO.getStatus())
+                    ||!authVersion.equals(userDTO.getAuthVersion())) {
+                User user1 = userService.lambdaQuery().eq(User::getUserId, userId).one();
+                if (user1==null||
+                        !Integer.valueOf(0).equals(user1.getStatus())
+                        || !authVersion.equals(user1.getAuthVersion())) {
+                    stringRedisTemplate.delete(token);
+                    return true;
+                }else{
+                    userDTO = BeanUtil.copyProperties(user1, UserDTO.class);
+                    if (executeScriptSaveHash(userDTO, keyForUser)) return true;
+                }
             }
         }
 
@@ -127,5 +143,13 @@ public class RefreshInterceptor implements HandlerInterceptor {
         return true;
     }
 
-
+    public boolean executeScriptSaveHash(UserDTO userDTO, String keyForUser) {
+        try {
+            executeSaveHashMapLua.executeScript(BeanUtil.beanToMap(userDTO), keyForUser, USER_CACHE_TTL_SECONDS);
+        } catch (Exception e) {
+            log.error("执行脚本失败", e);
+            return true;
+        }
+        return false;
+    }
 }

@@ -1,9 +1,6 @@
 package com.example.campuspass.service;
 
-import com.example.campuspass.dto.CodeLoginDTO;
-import com.example.campuspass.dto.PasswordLoginDTO;
-import com.example.campuspass.dto.Result;
-import com.example.campuspass.dto.SignUpDTO;
+import com.example.campuspass.dto.*;
 import com.example.campuspass.vo.LoginVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -18,4 +15,8 @@ public interface IAuthService {
     Result<Void> signUp(SignUpDTO signUpDTO);
 
     Result<Void> logOut(HttpServletRequest request);
+
+    Result<Void> changePassword(@Valid ChangePasswordDTO changePasswordDTO);
+
+    Result<Void> forgetPassword(@Valid ForgetPasswordDTO forgetPasswordDTO);
 }

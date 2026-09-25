@@ -9,19 +9,22 @@ import com.example.campuspass.entity.User;
 import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.UserMapper;
 import com.example.campuspass.service.IUserService;
+import com.example.campuspass.utils.RegexUtils;
 import com.example.campuspass.utils.lua_execute.ExecuteSaveHashMapLua;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.UserVO;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
+import static com.example.campuspass.utils.RedisConstants.USER_CACHE_KEY_PREFIX;
+import static com.example.campuspass.utils.RedisConstants.USER_CACHE_TTL_SECONDS;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
 @Service
@@ -86,16 +89,62 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         return Result.ok();
     }
 
+    @Override
+    public Result<UserVO> getMyProfile() {
+        Long userId = getUserId();
+        String key=USER_CACHE_KEY_PREFIX+userId;
+
+        Map<Object, Object> map = stringRedisTemplate.opsForHash().entries(key);
+        if (!map.isEmpty()) {
+            UserDTO userDTO = BeanUtil.fillBeanWithMap(map, new UserDTO(), false);
+            UserVO userVO = BeanUtil.copyProperties(userDTO, UserVO.class);
+            return Result.ok(userVO);
+        }
+
+        User user = lambdaQuery().eq(User::getUserId, userId).one();
+        if (user == null) {
+            error("用户不存在");
+        }
+        UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
+        return Result.ok(userVO);
+    }
+
+
+
+    @Override
+    public Result<Void> updateMyNickName(String name) {
+        RegexUtils.validateNickName(name);
+        Long userId = getUserId();
+        try {
+            boolean update = lambdaUpdate().eq(User::getUserId, userId).set(User::getUserName, name).update();
+            if(!update){
+                error("更新数据失败");
+            }
+        } catch (DuplicateKeyException e) {
+            error("用户名重复,请换一个试试呢");
+        }
+        stringRedisTemplate.delete(USER_CACHE_KEY_PREFIX + userId);
+        return Result.ok();
+    }
+
+    public static @NonNull Long getUserId() {
+        UserDTO userDTO = USER_THREAD_LOCAL.get();
+        if (userDTO == null) {
+            error("用户未登录");
+        }
+        return userDTO.getUserId();
+    }
+
     public static void error(String message) {
         throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
     }
 
     public void refreshCacheUser( User user,Integer status) {
         user.setStatus(status);
-        String key = "user:user-id:" + user.getUserId();
+        String key = USER_CACHE_KEY_PREFIX + user.getUserId();
         Map<String, Object> map = BeanUtil.beanToMap(BeanUtil.copyProperties(user, UserDTO.class));
 
-        executeSaveHashMapLua.executeScript(map,key,2*60L);
+        executeSaveHashMapLua.executeScript(map,key,USER_CACHE_TTL_SECONDS);
     }
 
     public static void checkIfAdmin() {

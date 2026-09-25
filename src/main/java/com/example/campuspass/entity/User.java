@@ -33,4 +33,6 @@ public class User  {
 
     private LocalDateTime updateTime;
 
+    private Long authVersion;
+
 }

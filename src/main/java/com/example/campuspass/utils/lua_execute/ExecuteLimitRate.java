@@ -1,4 +1,4 @@
-package com.example.campuspass.utils;
+package com.example.campuspass.utils.lua_execute;
 
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 @Component
-public class LimitRateUtils {
+public class ExecuteLimitRate {
     private static final DefaultRedisScript<Long> LIMIT_RATE_SCRIPT;
 
     @Autowired

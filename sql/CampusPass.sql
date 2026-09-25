@@ -62,16 +62,17 @@ create index idx_user_id
 
 create table tb_user
 (
-    user_id     bigint unsigned auto_increment comment '用户id'
+    user_id      bigint unsigned auto_increment comment '用户id'
         primary key,
-    user_name   varchar(50)                                not null comment '用户名',
-    password    varchar(255)                               not null comment '密码哈希',
-    student_id  varchar(20)                                not null comment '学号',
-    phone       varchar(20)                                not null comment '手机号',
-    role        tinyint unsigned default '0'               not null comment '角色：0普通用户，1管理员',
-    status      tinyint unsigned default '0'               not null comment '状态： 0正常，1禁用',
-    create_time datetime         default CURRENT_TIMESTAMP not null comment '创建时间',
-    update_time datetime         default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '修改时间',
+    user_name    varchar(50)                                not null comment '用户名',
+    password     varchar(255)                               not null comment '密码哈希',
+    student_id   varchar(20)                                not null comment '学号',
+    phone        varchar(20)                                not null comment '手机号',
+    role         tinyint unsigned default '0'               not null comment '角色：0普通用户，1管理员',
+    status       tinyint unsigned default '0'               not null comment '状态： 0正常，1禁用',
+    create_time  datetime         default CURRENT_TIMESTAMP not null comment '创建时间',
+    update_time  datetime         default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '修改时间',
+    auth_version bigint unsigned  default '0'               not null comment '登录版本号',
     constraint uk_phone
         unique (phone),
     constraint uk_student_id
@@ -89,13 +90,13 @@ create table tb_wait_list
 (
     wait_id       bigint unsigned auto_increment comment '候补id'
         primary key,
-    activity_id   bigint unsigned                            not null comment '活动id',
-    user_id       bigint unsigned                            not null comment '用户id',
-    status        tinyint unsigned default '0'               not null comment '候补状态：0候补中，1已转正，2已取消，3已失效',
+    activity_id   bigint unsigned                               not null comment '活动id',
+    user_id       bigint unsigned                               not null comment '用户id',
+    status        tinyint unsigned default '0'                  not null comment '候补状态：0候补中，1已转正，2已取消，3已失效',
     join_time     datetime(6)      default CURRENT_TIMESTAMP(6) not null comment '本次加入候补时间，重新加入时刷新',
     promoted_time datetime(6)                                   null comment '候补成功时间',
-    create_time   datetime         default CURRENT_TIMESTAMP null comment '创建时间',
-    update_time   datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
+    create_time   datetime         default CURRENT_TIMESTAMP    null comment '创建时间',
+    update_time   datetime         default CURRENT_TIMESTAMP    null on update CURRENT_TIMESTAMP comment '更新时间',
     constraint un_activity_user
         unique (activity_id, user_id),
     constraint chk_wait_promoted
