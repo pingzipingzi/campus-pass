@@ -40,7 +40,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
             throw new BusinessException(40000, "页码必须大于零", HttpStatus.BAD_REQUEST);
         }
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         Page<WaitList> result = lambdaQuery().eq(WaitList::getUserId, user.getUserId()).orderByDesc(WaitList::getWaitId).page(page);
         List<WaitListVO> list =
                 result.getRecords().stream()

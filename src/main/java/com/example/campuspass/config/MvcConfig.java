@@ -4,6 +4,7 @@ import com.example.campuspass.service.IUserService;
 import com.example.campuspass.utils.JwtUtils;
 import com.example.campuspass.utils.InnerInterceptor;
 import com.example.campuspass.utils.RefreshInterceptor;
+import com.example.campuspass.utils.lua_execute.ExecuteSaveHashMapLua;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -23,6 +24,9 @@ public class MvcConfig implements WebMvcConfigurer {
     @Autowired
     private IUserService userService;
 
+    @Autowired
+    private ExecuteSaveHashMapLua executeSaveHashMapLua;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new InnerInterceptor())
@@ -33,7 +37,7 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/swagger-ui.html"
                 ).order(1);
 
-        registry.addInterceptor(new RefreshInterceptor(stringRedisTemplate,jwtUtils,userService)).addPathPatterns("/**").order(0);
+        registry.addInterceptor(new RefreshInterceptor(stringRedisTemplate,jwtUtils,userService,executeSaveHashMapLua)).addPathPatterns("/**").order(0);
     }
 
 }

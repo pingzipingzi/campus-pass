@@ -46,7 +46,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
 
     @Override
     public Result<Void> createActivity(ActivityDTO activityDTO) {
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
             throw new BusinessException(40000, "用户未登录", HttpStatus.BAD_REQUEST);
         }
@@ -125,7 +125,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     @Override
     public Result<PageResultVO<ActivityPageVO>> getMyActivityPageList(Integer pages) {
         Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
             throw new BusinessException(40000, "用户未登录", HttpStatus.BAD_REQUEST);
         }
@@ -186,7 +186,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     public static void checkIfAdmin() {
-        User user = USER_THREAD_LOCAL.get();
+        User user =BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null || !Integer.valueOf(1).equals(user.getRole())) {
             throw new BusinessException(40000, "用户不具备管理员权限", HttpStatus.BAD_REQUEST);
         }
@@ -220,7 +220,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     private Activity checkUserID(Long activityId) {
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
             throw new BusinessException(40000, "用户未登录", HttpStatus.BAD_REQUEST);
         }
@@ -233,7 +233,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     private void checkOwner(Activity activity) {
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null) {
             throw new BusinessException(40000, "用户未登录", HttpStatus.BAD_REQUEST);
         }

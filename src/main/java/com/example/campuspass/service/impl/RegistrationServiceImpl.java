@@ -269,7 +269,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     }
 
     private static Long currentUserId() {
-        User user = USER_THREAD_LOCAL.get();
+        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null || user.getUserId() == null) {
             throw error("用户未登录");
         }
