@@ -126,6 +126,7 @@ public class AuthServiceImpl implements IAuthService {
         }
         return Result.ok();
     }
+
     @Override
     public Result<Void> signUp(SignUpDTO signUpDTO) {
         String phone = signUpDTO.getPhone();

@@ -1,18 +1,3 @@
---[[
-local key= KEY[1]
-
-local ttl=KEY[2]
-
-if #ARGV==0 or #ARGV%2 ~=0 then
-    return -1
-end
-
-redis.call('hset',key,unpack(ARGV))
-
-redis.call('expire' ,key,ttl)
-
-return 0]]
-
 
 local key=KEYS[1]
 

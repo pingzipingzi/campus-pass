@@ -24,7 +24,7 @@ public class ActivityController {
     @Autowired
     private IActivityService activityService;
 
-    @Operation(summary="创建活动", description = "详情略")
+    @Operation(summary="创建活动")
     @PostMapping
     public Result<Void> createActivity(@Valid @RequestBody ActivityDTO activityDTO) {
         return activityService.createActivity(activityDTO);

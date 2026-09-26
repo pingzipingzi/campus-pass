@@ -1,6 +1,13 @@
 package com.example.campuspass.utils;
 
 public class RedisConstants {
+    // 活动详情缓存，后接活动 ID
+    public static final String ACTIVITY_DETAIL_KEY_PREFIX = "activity:detail:";
+    // 缓存重建与删除共用的锁，后接完整缓存 key
+    public static final String CACHE_LOCK_KEY_PREFIX = "lock:";
+    // 不存在结果的缓存标记
+    public static final String CACHE_NOT_FOUND_VALUE = "NOT_FOUND";
+
     // 验证码，后接手机号
     public static final String LOGIN_CODE_KEY_PREFIX = "login:code:";
 
