@@ -7,12 +7,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.campuspass.dto.ActivityDTO;
+import com.example.campuspass.dto.ActivityOfRegistrationDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.entity.Activity;
 import com.example.campuspass.entity.Registration;
 import com.example.campuspass.entity.User;
 import com.example.campuspass.entity.WaitList;
-import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.ActivityMapper;
 import com.example.campuspass.service.IActivityService;
 import com.example.campuspass.mapper.RegistrationMapper;
@@ -20,6 +20,7 @@ import com.example.campuspass.mapper.WaitListMapper;
 import com.example.campuspass.service.support.ActivityMutationGuard;
 import com.example.campuspass.utils.RedissonUtils;
 import com.example.campuspass.utils.enums.ActivityTypeEnum;
+import com.example.campuspass.utils.lua_execute.ExecuteSaveHashMapLua;
 import com.example.campuspass.vo.ActivityPageVO;
 import com.example.campuspass.vo.ActivityVO;
 import com.example.campuspass.vo.PageResultVO;
@@ -27,17 +28,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.ACTIVITY_DETAIL_KEY_PREFIX;
 import static com.example.campuspass.utils.RedisConstants.CACHE_NOT_FOUND_VALUE;
 import static com.example.campuspass.utils.MybatisPlusConstants.PAGE_SIZE_ACTIVITY;
@@ -65,6 +70,9 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
 
     @Autowired
     private RedissonUtils redissonUtils;
+
+    @Autowired
+    private ExecuteSaveHashMapLua executeSaveHashMapLua;
 
     @Override
     public Result<Void> createActivity(ActivityDTO activityDTO) {
@@ -156,25 +164,21 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         }
         boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId)
                 .gt(Activity::getRegistrationEndTime, LocalDateTime.now())
-                .eq(Activity::getStatus, 0).set(Activity::getStatus, 1L).update();
+                .eq(Activity::getStatus, 0).set(Activity::getStatus, 1L)
+                .set(Activity::getRegistrationCacheStatus, 0).update();
         if (!success) {
             error("更新失败");
         }
-        removeActivityCacheAfterCommit(activityId);
+        removeActivityCacheAfterCommitWhenPublish(activityId);
         return Result.ok();
     }
-
-    public static void error(String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
-    }
-
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> cancelActivity(Long activityId) {
         Activity activity = mutationGuard.lock(activityId);
         checkOwner(activity);
         cancelLockedActivity(activity);
-        removeActivityCacheAfterCommit(activityId);
+        removeActivityCacheAfterCommitWhenCancel(activityId);
         return Result.ok();
     }
 
@@ -209,7 +213,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     public Result<Void> forceCancelActivityForAdmin(Long activityId) {
         checkIfAdmin();
         cancelLockedActivity(mutationGuard.lock(activityId));
-        removeActivityCacheAfterCommit(activityId);
+        removeActivityCacheAfterCommitWhenCancel(activityId);
         return Result.ok();
     }
 
@@ -289,16 +293,86 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         }
     }
 
-    
-    private void removeActivityCacheAfterCommit(Long activityId) {
+
+
+    public void removeActivityCacheAfterCommitWhenPublish(Long activityId) {
         String key = ACTIVITY_DETAIL_KEY_PREFIX + activityId;
 
         TransactionSynchronizationManager.registerSynchronization(
                 new TransactionSynchronization() {
                     @Override
-                    public void afterCommit(){
+                    public void afterCommit() {
                         try {
                             redissonUtils.cacheRemove(key);
+                        } catch (Exception e) {
+                            log.error("活动{}提交成功但是缓存删除失败", activityId, e);
+                        }
+
+                        try{
+                            self.activityCacheInitialization(activityId);
+                        }catch (Exception e){
+                            log.error("活动{}提交成功但是报名缓存初始化失败",activityId,e);
+                        }
+                    }
+
+                }
+        );
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public void activityCacheInitialization(Long activityId) {
+        Activity activity = mutationGuard.lock(activityId);
+        if (Integer.valueOf(1).equals(activity.getRegistrationCacheStatus())) {
+            return;
+        }
+        if (!Integer.valueOf(1).equals(activity.getStatus())) {
+            error("活动状态异常");
+        }
+        if (Duration.between(LocalDateTime.now(), activity.getRegistrationEndTime()).getSeconds() < 10) {
+            error("活动时间不足");
+        }
+        registerActivityCache(activityId, activity);
+        lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getRegistrationCacheStatus, 1).update();
+    }
+
+    public void registerActivityCache(Long activityId,Activity activity) {
+        long seconds = Duration.between(LocalDateTime.now(), activity.getRegistrationEndTime()).getSeconds();
+        ActivityOfRegistrationDTO activityOfRegistrationDTO=new ActivityOfRegistrationDTO();
+        activityOfRegistrationDTO.setRemainingCapacity(activity.getRemainingCapacity());
+
+        activityOfRegistrationDTO.setRegistrationStartTime(activity.getRegistrationStartTime()
+                .atZone(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli());
+
+        activityOfRegistrationDTO.setRegistrationEndTime(activity.getRegistrationEndTime()
+                .atZone(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli());
+        Map<String, Object> map = BeanUtil.beanToMap(activityOfRegistrationDTO);
+        executeSaveHashMapLua.executeInitialization(map, "registration:activity:" + activityId, seconds);
+    }
+
+    @Scheduled(fixedDelay = 30L,timeUnit = TimeUnit.SECONDS)
+    public void scheduleActivityCacheInitialization() {
+        List<Activity> activities = lambdaQuery().eq(Activity::getStatus, 1).eq(Activity::getRegistrationCacheStatus, 0).list();
+        for (Activity activity : activities) {
+            Long activityId = activity.getActivityId();
+            try {
+                self.activityCacheInitialization(activityId);
+            } catch (Exception e) {
+                log.error("活动id {}缓存初始化失败", activityId, e);
+            }
+        }
+    }
+
+    public void removeActivityCacheAfterCommitWhenCancel(Long activityId) {
+
+        String key = ACTIVITY_DETAIL_KEY_PREFIX + activityId;
+
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            redissonUtils.cacheRemove(key);
+                            stringRedisTemplate.delete("registration:activity:" + activityId);
                         } catch (Exception e) {
                             log.error("活动{}提交成功但是缓存删除失败", activityId, e);
                         }

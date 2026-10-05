@@ -1,22 +1,23 @@
 create table tb_activity
 (
-    activity_id             bigint unsigned auto_increment comment '活动id'
+    activity_id               bigint unsigned auto_increment comment '活动id'
         primary key,
-    activity_name           varchar(100)                               not null comment '活动名',
-    activity_description    text                                       null comment '活动介绍',
-    activity_type           tinyint unsigned                           not null comment '活动类型: 0 = 讲座 / 宣讲
+    activity_name             varchar(100)                               not null comment '活动名',
+    activity_description      text                                       null comment '活动介绍',
+    activity_type             tinyint unsigned                           not null comment '活动类型: 0 = 讲座 / 宣讲
     ,1 = 竞赛 / 比赛,2 = 体育活动,3 = 志愿服务,4 = 社团 / 文娱活动,5 = 其他',
-    activity_location       varchar(100)                               not null comment '活动地点',
-    registration_start_time datetime                                   not null comment '报名开始时间',
-    registration_end_time   datetime                                   not null comment '报名截止时间',
-    start_time              datetime                                   not null comment '活动开始时间',
-    end_time                datetime                                   not null comment '活动结束时间',
-    total_capacity          int unsigned                               not null comment '总名额',
-    remaining_capacity      int unsigned                               not null comment '剩余名额',
-    status                  tinyint unsigned default '0'               not null comment '状态：0草稿，1已发布，2已取消',
-    creator_id              bigint unsigned                            not null comment '创建人id',
-    create_time             datetime         default CURRENT_TIMESTAMP null comment '创建时间',
-    update_time             datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
+    activity_location         varchar(100)                               not null comment '活动地点',
+    registration_start_time   datetime                                   not null comment '报名开始时间',
+    registration_end_time     datetime                                   not null comment '报名截止时间',
+    start_time                datetime                                   not null comment '活动开始时间',
+    end_time                  datetime                                   not null comment '活动结束时间',
+    total_capacity            int unsigned                               not null comment '总名额',
+    remaining_capacity        int unsigned                               not null comment '剩余名额',
+    status                    tinyint unsigned default '0'               not null comment '状态：0草稿，1已发布，2已取消',
+    creator_id                bigint unsigned                            not null comment '创建人id',
+    create_time               datetime         default CURRENT_TIMESTAMP null comment '创建时间',
+    update_time               datetime         default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP comment '更新时间',
+    registration_cache_status tinyint unsigned                           null comment '0 未初始化，1 初始化成功',
     constraint chk_activity_capacity
         check ((`total_capacity` > 0) and (`remaining_capacity` <= `total_capacity`)),
     constraint chk_activity_status
@@ -25,7 +26,9 @@ create table tb_activity
         check ((`registration_start_time` < `registration_end_time`) and (`registration_end_time` < `start_time`) and
                (`start_time` < `end_time`)),
     constraint chk_activity_type
-        check (`activity_type` in (0, 1, 2, 3, 4, 5))
+        check (`activity_type` in (0, 1, 2, 3, 4, 5)),
+    constraint chk_registration_cache_status
+        check (`registration_cache_status` in (0, 1))
 )
     comment '活动表';
 
@@ -59,6 +62,24 @@ create table tb_registration
 
 create index idx_user_id
     on tb_registration (user_id);
+
+create table tb_request
+(
+    request_id                        char(36)                           not null comment '请求id'
+        primary key,
+    activity_id                       bigint unsigned                    not null comment '活动id',
+    user_id                           bigint unsigned                    not null comment '用户id',
+    status                            tinyint unsigned                   not null comment '请求状态：0请求中，1已成功，2已取消',
+    create_time                       datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    update_time                       datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '修改时间',
+    is_stock_changed_when_dead_letter tinyint unsigned                   null comment '死信处理时，订单是否造成缓存预扣库存了 0是 1不是',
+    is_compensate                     tinyint unsigned                   null comment '死信时是否补偿成功',
+    constraint chk_request_status
+        check (`status` in (0, 1, 2)),
+    constraint chk_request_stock
+        check (`is_stock_changed_when_dead_letter` in (0, 1))
+)
+    comment '请求表';
 
 create table tb_user
 (
@@ -109,6 +130,9 @@ create table tb_wait_list
 
 create index idx_activity_status_join_time
     on tb_wait_list (activity_id, status, join_time, wait_id);
+
+create index idx_wait_list_join_time
+    on tb_wait_list (join_time);
 
 create index idx_wait_user_id
     on tb_wait_list (user_id);

@@ -1,12 +1,10 @@
 package com.example.campuspass.utils;
 
 import cn.hutool.core.util.StrUtil;
-import com.example.campuspass.exception.BusinessException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -14,6 +12,7 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.CACHE_LOCK_KEY_PREFIX;
 import static com.example.campuspass.utils.RedisConstants.CACHE_NOT_FOUND_VALUE;
 
@@ -92,9 +91,5 @@ public class RedissonUtils {
                 lock.unlock();
             }
         }
-    }
-
-    public static void error(String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
     }
 }

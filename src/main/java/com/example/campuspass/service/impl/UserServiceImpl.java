@@ -6,7 +6,6 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.entity.User;
-import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.UserMapper;
 import com.example.campuspass.service.IUserService;
 import com.example.campuspass.utils.RegexUtils;
@@ -17,12 +16,12 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.USER_CACHE_KEY_PREFIX;
 import static com.example.campuspass.utils.RedisConstants.USER_CACHE_TTL_SECONDS;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
@@ -134,11 +133,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         return userDTO.getUserId();
     }
-
-    public static void error(String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
-    }
-
     public void refreshCacheUser( User user,Integer status) {
         user.setStatus(status);
         String key = USER_CACHE_KEY_PREFIX + user.getUserId();

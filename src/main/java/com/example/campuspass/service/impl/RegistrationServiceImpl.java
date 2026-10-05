@@ -1,29 +1,41 @@
 package com.example.campuspass.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.campuspass.dto.MessageDTO;
 import com.example.campuspass.dto.Result;
+import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.entity.*;
-import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.*;
-import com.example.campuspass.service.IRegistrationService;
+import com.example.campuspass.service.*;
 import com.example.campuspass.service.support.ActivityMutationGuard;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.RegistrationVO;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.annotation.*;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
+@Slf4j
 @Service
 public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Registration>
         implements IRegistrationService {
@@ -31,6 +43,20 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     @Autowired private WaitListMapper waitListMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private ActivityMutationGuard mutationGuard;
+    @Autowired private StringRedisTemplate stringRedisTemplate;
+    @Autowired private RabbitTemplate rabbitTemplate;
+    @Autowired private IActivityService activityService;
+    @Autowired private IWaitListService waitListService;
+    @Autowired private IUserService userService;
+    @Autowired private IRequestService requestService;
+    private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_SCRIPT ;
+
+    static {
+        REGISTER_ACTIVITY_SCRIPT = new DefaultRedisScript<>();
+        REGISTER_ACTIVITY_SCRIPT.setResultType(Long.class);
+        REGISTER_ACTIVITY_SCRIPT.setLocation(new ClassPathResource("lua/register_activity.lua"));
+    }
+
     private static final int PAGE_SIZE = 10;
 
     @Override
@@ -39,10 +65,12 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         Long userId = currentUserId();
         Activity activity = activityMapper.selectById(activityId);
         if (activity == null) {
-            throw error("活动不存在");
+            error("活动不存在");
         }
-        Registration registration = findRegistration(activityId, userId);
-        WaitList waiting = findWaitList(activityId, userId);
+        Registration registration = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
+        WaitList waiting = waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
+                .eq(WaitList::getActivityId, activityId).eq(WaitList::getUserId, userId));
         RegistrationVO vo = registration == null ? new RegistrationVO()
                 : BeanUtil.copyProperties(registration, RegistrationVO.class);
         vo.setActivityId(activityId);
@@ -78,64 +106,133 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     }
 
     @Override
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> registerActivity(Long activityId) {
         Long userId = currentUserId();
-        // 必须先锁活动，再读取报名/候补；两张表的唯一键不能保证跨表互斥。
-        Activity activity = mutationGuard.lock(activityId);
-        checkActivityRegistrationTime(activity);
+
         User user = userMapper.selectById(userId);
         if (user == null || !Integer.valueOf(0).equals(user.getStatus())) {
-            throw error("账号不可用");
-        }
-        Registration registration = findRegistration(activityId, userId);
-        if (registration != null && registration.getStatus() == 0) {
-            throw error("您已报名，请勿重复报名");
-        }
-        WaitList waiting = findWaitList(activityId, userId);
-        if (waiting != null && waiting.getStatus() == 0) {
-            throw error("您已在候补队列中");
+            error("账号不可用");
         }
 
-        // 即使出现历史遗留空位，也优先安排已经排队的人。
-        promoteAvailable(activity);
-        if (activity.getRemainingCapacity() > 0) {
-            activateRegistration(activityId, userId);
-            takeSeat(activity);
-            return Result.ok();
+        String requestId = UUID.randomUUID().toString();
+
+        String activityOfRegistrationKey = "registration:activity:" + activityId;
+
+        String participantsOfActivityKey = "registration:participant:" + activityId + ":" + userId;
+
+        int random = ThreadLocalRandom.current().nextInt(0, 30);
+
+        long sendTime = System.currentTimeMillis();
+        
+        Long result = stringRedisTemplate.execute(REGISTER_ACTIVITY_SCRIPT,
+                List.of(activityOfRegistrationKey, participantsOfActivityKey),
+                Long.toString(sendTime), requestId,Integer.toString(random));
+
+        if (result == -1) {
+            error("服务器异常");
         }
-        checkActivityRegistrationTime(activity);
-        enqueue(activityId, userId, waiting);
-        return Result.ok("报名人数已满，已加入候补队列");
+        if(result == -2) {
+            error("现在不在报名时间内");
+        }
+        if (result == 2) {
+            error("您已经报名过了");
+        }
+
+        MessageDTO messageDTO = new MessageDTO();
+        messageDTO.setActivityId(activityId);
+        messageDTO.setUserId(userId);
+        messageDTO.setRequestId(requestId);
+        messageDTO.setSendTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(sendTime), ZoneId.of("Asia/Shanghai")));
+
+        if (result == 1) {
+            messageDTO.setCacheStatus(1);
+            rabbitTemplate.convertAndSend("campuspass.direct", "registerActivity",
+                    JSONUtil.toJsonStr(messageDTO));
+            return Result.ok("报名人数已满，已自动帮您提交候补请求");
+        }
+
+        messageDTO.setCacheStatus(0);
+        rabbitTemplate.convertAndSend("campuspass.direct", "registerActivity",
+                JSONUtil.toJsonStr(messageDTO));
+        return Result.ok("报名请求提交成功");
     }
 
-    public static void checkActivityRegistrationTime(Activity activity) {
-        if (!Integer.valueOf(1).equals(activity.getStatus())) {
-            throw error("活动未发布或已取消");
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void processMessage(Activity activity,Long userId ,String requestId,Integer cacheStatus) {
+
+        Long activityId = activity.getActivityId();
+
+        boolean updateRequest = requestService.lambdaUpdate().eq(Request::getRequestId, requestId).set(Request::getStatus, 1).update();
+        if(!updateRequest) {
+            error("服务器异常，请重试");}
+
+        Registration registration = lambdaQuery().eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
+        if (registration != null && registration.getStatus() == 0) {
+            error("您已经报名过了");
         }
-        LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(activity.getRegistrationStartTime())) {
-            throw error("活动报名未开始");
+
+        if (cacheStatus == 1 || !(activity.getRemainingCapacity() > 0)) {
+            WaitList candidate = waitListService.lambdaQuery().eq(WaitList::getActivityId, activityId).eq(WaitList::getUserId, userId).one();
+            if (candidate == null) {
+                candidate = new WaitList();
+                candidate.setActivityId(activityId);
+                candidate.setUserId(userId);
+                candidate.setStatus(0);
+                boolean save = waitListService.save(candidate);
+                if (!save) {
+                    error("服务器异常，请重试");
+                }
+            } else {
+                if (candidate.getStatus() != 2) {
+                    error("您已经报名过了");
+                }
+                boolean update = waitListService.lambdaUpdate().eq(WaitList::getWaitId, candidate.getWaitId()).set(WaitList::getStatus, 0)
+                        .set(WaitList::getJoinTime, LocalDateTime.now()).update();
+                if (!update) {
+                    error("服务器异常，请重试");
+                }
+            }
+            return;
         }
-        if (!now.isBefore(activity.getRegistrationEndTime())) {
-            throw error("活动报名已截止");
+
+        boolean update = activityService.lambdaUpdate().eq(Activity::getActivityId, activityId).gt(Activity::getRemainingCapacity, 0)
+                .setSql("remaining_capacity =remaining_capacity - 1").update();
+        if (!update) {
+            error("服务器异常，请重试");
+        }
+
+        if(registration==null) {
+            registration = new Registration();
+            registration.setActivityId(activityId);
+            registration.setUserId(userId);
+            registration.setStatus(0);
+            boolean save = save(registration);
+            if (!save) {
+                error("服务器异常，请重试");
+            }
+        }else{
+            boolean updateRegistration = lambdaUpdate().eq(Registration::getRegistrationId, registration.getRegistrationId()).set(Registration::getStatus, 0).update();
+            if(!updateRegistration) {
+                error("服务器异常，请重试");}
         }
     }
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> cancelRegistration(Long activityId) {
+
         Long userId = currentUserId();
         Activity activity = mutationGuard.lock(activityId);
-        Registration registration = findRegistration(activityId, userId);
+        Registration registration = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
         if (registration == null || registration.getStatus() != 0) {
-            throw error("您当前没有成功报名，不能释放名额");
+            error("您当前没有成功报名，不能释放名额");
         }
         requireOne(baseMapper.update(null, Wrappers.<Registration>lambdaUpdate()
                 .eq(Registration::getRegistrationId, registration.getRegistrationId())
                 .eq(Registration::getStatus, 0).set(Registration::getStatus, 1)));
         if (activity.getRemainingCapacity() >= activity.getTotalCapacity()) {
-            throw error("活动名额数据异常");
+            error("活动名额数据异常");
         }
         requireOne(activityMapper.update(null, Wrappers.<Activity>lambdaUpdate()
                 .eq(Activity::getActivityId, activityId)
@@ -146,15 +243,53 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         if (activity.getStatus() == 1 && LocalDateTime.now().isBefore(activity.getRegistrationEndTime())) {
             promoteAvailable(activity);
         } else {
-            expireWaiting(activityId);
+            waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                    .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
+                    .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
         }
         return Result.ok();
     }
 
+    @Override
+    public Result<PageResultVO<RegistrationVO>> pageMyRegistration(Integer pages) {
+        if (pages == null || pages < 1) {
+            error("页码必须大于零");
+        }
+        Page<Registration> result = lambdaQuery().eq(Registration::getUserId, currentUserId())
+                .orderByDesc(Registration::getRegistrationId).page(new Page<>(pages, PAGE_SIZE));
+        List<RegistrationVO> list = result.getRecords().stream().map(record -> {
+            RegistrationVO vo = BeanUtil.copyProperties(record, RegistrationVO.class);
+            vo.setStatusDescription(switch (record.getStatus()) {
+                case 0 -> "已报名";
+                case 1 -> "已取消报名";
+                default -> "报名已失效";
+            });
+            return vo;
+        }).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(),
+                result.getSize(), result.getPages(), list));
+    }
+
+    private static void checkActivityRegistrationTime(Activity activity) {
+        if (!Integer.valueOf(1).equals(activity.getStatus())) {
+            error("活动未发布或已取消");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(activity.getRegistrationStartTime())) {
+            error("活动报名未开始");
+        }
+        if (!now.isBefore(activity.getRegistrationEndTime())) {
+            error("活动报名已截止");
+        }
+    }
+
+    // 报名和取消报名共用递补流程，统一候补顺序和账号状态校验。
     private void promoteAvailable(Activity activity) {
         while (activity.getRemainingCapacity() > 0) {
             if (!LocalDateTime.now().isBefore(activity.getRegistrationEndTime())) {
-                expireWaiting(activity.getActivityId());
+                waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                        .eq(WaitList::getActivityId, activity.getActivityId()).eq(WaitList::getStatus, 0)
+                        .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
                 break;
             }
             WaitList head = waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
@@ -182,8 +317,10 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         }
     }
 
+    // 直接报名和候补转正共用：创建或恢复报名关系。
     private void activateRegistration(Long activityId, Long userId) {
-        Registration existing = findRegistration(activityId, userId);
+        Registration existing = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
         if (existing == null) {
             Registration registration = new Registration();
             registration.setActivityId(activityId);
@@ -197,36 +334,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         }
     }
 
-    private void enqueue(Long activityId, Long userId, WaitList existing) {
-        LocalDateTime joinTime = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
-        WaitList tail = waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
-                .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
-                .orderByDesc(WaitList::getJoinTime, WaitList::getWaitId).last("LIMIT 1"));
-        // 重入队复用 wait_id，因此同一时刻也必须排在当前队尾之后。
-        if (tail != null && !joinTime.isAfter(tail.getJoinTime())) {
-            joinTime = tail.getJoinTime().plusNanos(1_000);
-        }
-        if (existing == null) {
-            WaitList waiting = new WaitList();
-            waiting.setActivityId(activityId);
-            waiting.setUserId(userId);
-            waiting.setStatus(0);
-            waiting.setJoinTime(joinTime);
-            requireOne(waitListMapper.insert(waiting));
-        } else {
-            requireOne(waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
-                    .eq(WaitList::getWaitId, existing.getWaitId()).ne(WaitList::getStatus, 0)
-                    .set(WaitList::getStatus, 0).set(WaitList::getJoinTime, joinTime)
-                    .set(WaitList::getPromotedTime, null)));
-        }
-    }
-
-    private void expireWaiting(Long activityId) {
-        waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
-                .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
-                .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
-    }
-
+    // 扣减时再次校验时间和余量，失败由外层事务回滚。
     private void takeSeat(Activity activity) {
         LocalDateTime now = LocalDateTime.now();
         requireOne(activityMapper.update(null, Wrappers.<Activity>lambdaUpdate()
@@ -238,51 +346,17 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         activity.setRemainingCapacity(activity.getRemainingCapacity() - 1);
     }
 
-    private Registration findRegistration(Long activityId, Long userId) {
-        return baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
-                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
-    }
-
-    private WaitList findWaitList(Long activityId, Long userId) {
-        return waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
-                .eq(WaitList::getActivityId, activityId).eq(WaitList::getUserId, userId));
-    }
-
-    @Override
-    public Result<PageResultVO<RegistrationVO>> pageMyRegistration(Integer pages) {
-        if (pages == null || pages < 1) {
-            throw error("页码必须大于零");
-        }
-        Page<Registration> result = lambdaQuery().eq(Registration::getUserId, currentUserId())
-                .orderByDesc(Registration::getRegistrationId).page(new Page<>(pages, PAGE_SIZE));
-        List<RegistrationVO> list = result.getRecords().stream().map(record -> {
-            RegistrationVO vo = BeanUtil.copyProperties(record, RegistrationVO.class);
-            vo.setStatusDescription(switch (record.getStatus()) {
-                case 0 -> "已报名";
-                case 1 -> "已取消报名";
-                default -> "报名已失效";
-            });
-            return vo;
-        }).toList();
-        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(),
-                result.getSize(), result.getPages(), list));
-    }
-
     private static Long currentUserId() {
-        User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
+        UserDTO user = USER_THREAD_LOCAL.get();
         if (user == null || user.getUserId() == null) {
-            throw error("用户未登录");
+            error("用户未登录");
         }
         return user.getUserId();
     }
 
     private static void requireOne(int affected) {
         if (affected != 1) {
-            throw error("数据状态已变化，请重试");
+            error("数据状态已变化，请重试");
         }
-    }
-
-    private static BusinessException error(String message) {
-        return new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
     }
 }

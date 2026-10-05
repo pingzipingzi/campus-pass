@@ -4,7 +4,6 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.example.campuspass.dto.*;
 import com.example.campuspass.entity.User;
-import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.service.IAuthService;
 import com.example.campuspass.service.IUserService;
 import com.example.campuspass.utils.JwtUtils;
@@ -21,13 +20,13 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.*;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.CODE_VERIFY_RATE_LIMIT_KEY_PREFIX;
 import static com.example.campuspass.utils.RedisConstants.LOGIN_CODE_KEY_PREFIX;
 import static com.example.campuspass.utils.RedisConstants.LOGIN_STATUS_KEY_PREFIX;
@@ -104,12 +103,6 @@ public class AuthServiceImpl implements IAuthService {
         return Result.ok(new LoginVO(token, user.getUserId(), user.getUserName(), user.getRole()));
 
     }
-
-    public static void error( String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
-    }
-
-
     @Override
     public Result<Void> logOut(HttpServletRequest request) {
 

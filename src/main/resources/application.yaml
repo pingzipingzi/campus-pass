@@ -12,6 +12,22 @@ spring:
       redis:
         host: ${REDIS_HOST}
         port: 6379
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: 5672
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: ${RABBITMQ_VIRTUAL_HOST}
+    listener:
+      simple:
+        prefetch: 1  #每次只能获取一条消息，处理完成才能获取下一个消息，避免预分配导致处理速度不同的消费者均分要处理的消息
+        retry:
+          enabled: true
+          max-retries: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
+        default-requeue-rejected: false #被拒绝后，不会返回原队列
   jackson:
       default-property-inclusion: non_null #json处理忽略空字段
 mybatis-plus:

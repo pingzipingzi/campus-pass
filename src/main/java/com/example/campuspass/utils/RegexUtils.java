@@ -1,9 +1,8 @@
 package com.example.campuspass.utils;
 
 import cn.hutool.core.util.StrUtil;
-import com.example.campuspass.exception.BusinessException;
-import org.springframework.http.HttpStatus;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RegexConstants.NICK_NAME_REGEX;
 import static com.example.campuspass.utils.RegexConstants.PHONE_REGEX;
 
@@ -30,9 +29,4 @@ public class RegexUtils {
         }
         return (!str.matches(regex));
     }
-
-    public static void error(String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
-    }
-
 }

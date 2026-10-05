@@ -26,6 +26,7 @@ public class Activity {
     private Integer remainingCapacity;
     private Integer status;
     private Long creatorId;
+    private Integer registrationCacheStatus;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

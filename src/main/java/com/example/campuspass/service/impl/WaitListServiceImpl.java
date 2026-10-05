@@ -9,13 +9,11 @@ import com.example.campuspass.service.support.ActivityMutationGuard;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.entity.User;
 import com.example.campuspass.entity.WaitList;
-import com.example.campuspass.exception.BusinessException;
 import com.example.campuspass.mapper.WaitListMapper;
 import com.example.campuspass.service.IWaitListService;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.WaitListVO;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
@@ -23,6 +21,7 @@ import org.springframework.transaction.annotation.Isolation;
 import java.util.List;
 import java.time.LocalDateTime;
 
+import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
 @Service
@@ -37,7 +36,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     @Override
     public Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages) {
         if (pages == null || pages < 1) {
-            throw new BusinessException(40000, "页码必须大于零", HttpStatus.BAD_REQUEST);
+            error("页码必须大于零");
         }
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
@@ -56,7 +55,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
         Activity activity = mutationGuard.lock(activityId);
         WaitList one = lambdaQuery().eq(WaitList::getUserId, userId).eq(WaitList::getActivityId, activityId).one();
         if(one==null||one.getStatus()!=0){
-            throw new BusinessException(40000, "您目前未处于候补状态", HttpStatus.BAD_REQUEST);
+            error("您目前未处于候补状态");
         }
         boolean expired = activity.getStatus() == 2
                 || !LocalDateTime.now().isBefore(activity.getRegistrationEndTime());
@@ -65,7 +64,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
                 .set(WaitList::getPromotedTime, null).update();
 
         if (!success) {
-            throw new BusinessException(40000, "数据更新失败", HttpStatus.BAD_REQUEST);
+            error("数据更新失败");
         }
         return Result.ok();
     }
