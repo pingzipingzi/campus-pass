@@ -9,6 +9,7 @@ import com.example.campuspass.dto.MessageDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.entity.*;
+import com.example.campuspass.listener.RegistrationDeadLetterConsumer;
 import com.example.campuspass.mapper.*;
 import com.example.campuspass.service.*;
 import com.example.campuspass.service.support.ActivityMutationGuard;
@@ -21,16 +22,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
@@ -39,22 +42,38 @@ import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 @Service
 public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Registration>
         implements IRegistrationService {
-    @Autowired private ActivityMapper activityMapper;
-    @Autowired private WaitListMapper waitListMapper;
-    @Autowired private UserMapper userMapper;
-    @Autowired private ActivityMutationGuard mutationGuard;
-    @Autowired private StringRedisTemplate stringRedisTemplate;
-    @Autowired private RabbitTemplate rabbitTemplate;
-    @Autowired private IActivityService activityService;
-    @Autowired private IWaitListService waitListService;
-    @Autowired private IUserService userService;
-    @Autowired private IRequestService requestService;
-    private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_SCRIPT ;
-
+    @Autowired
+    private ActivityMapper activityMapper;
+    @Autowired
+    private WaitListMapper waitListMapper;
+    @Autowired
+    private UserMapper userMapper;
+    @Autowired
+    private ActivityMutationGuard mutationGuard;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+    @Autowired
+    private IActivityService activityService;
+    @Autowired
+    private IWaitListService waitListService;
+    @Autowired
+    private IUserService userService;
+    @Autowired
+    private IRequestService requestService;
+    @Autowired
+    private RegistrationDeadLetterConsumer registrationDeadLetterConsumer;
+    private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_SCRIPT;
+    private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_PENDING_SEND_SCRIPT;
     static {
         REGISTER_ACTIVITY_SCRIPT = new DefaultRedisScript<>();
         REGISTER_ACTIVITY_SCRIPT.setResultType(Long.class);
         REGISTER_ACTIVITY_SCRIPT.setLocation(new ClassPathResource("lua/register_activity.lua"));
+
+        REGISTER_ACTIVITY_PENDING_SEND_SCRIPT = new DefaultRedisScript<>();
+        REGISTER_ACTIVITY_PENDING_SEND_SCRIPT.setResultType(Long.class);
+        REGISTER_ACTIVITY_PENDING_SEND_SCRIPT.setLocation(new ClassPathResource("lua/register_activity_pending_send.lua"));
     }
 
     private static final int PAGE_SIZE = 10;
@@ -120,18 +139,23 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
 
         String participantsOfActivityKey = "registration:participant:" + activityId + ":" + userId;
 
+        String messageKey = "registration:message:" + requestId;
+
+        String pendingKey = "registration:message:pending";
+
         int random = ThreadLocalRandom.current().nextInt(0, 30);
 
         long sendTime = System.currentTimeMillis();
-        
+
         Long result = stringRedisTemplate.execute(REGISTER_ACTIVITY_SCRIPT,
-                List.of(activityOfRegistrationKey, participantsOfActivityKey),
-                Long.toString(sendTime), requestId,Integer.toString(random));
+                List.of(activityOfRegistrationKey, participantsOfActivityKey, messageKey, pendingKey),
+                Long.toString(sendTime), requestId, Integer.toString(random), Long.toString(activityId),
+                Long.toString(userId));
 
         if (result == -1) {
             error("服务器异常");
         }
-        if(result == -2) {
+        if (result == -2) {
             error("现在不在报名时间内");
         }
         if (result == 2) {
@@ -142,7 +166,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         messageDTO.setActivityId(activityId);
         messageDTO.setUserId(userId);
         messageDTO.setRequestId(requestId);
-        messageDTO.setSendTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(sendTime), ZoneId.of("Asia/Shanghai")));
+        messageDTO.setSendTime(sendTime);
 
         if (result == 1) {
             messageDTO.setCacheStatus(1);
@@ -158,13 +182,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void processMessage(Activity activity,Long userId ,String requestId,Integer cacheStatus) {
+    public void processMessage(Activity activity, Long userId, String requestId, Integer cacheStatus) {
 
         Long activityId = activity.getActivityId();
 
         boolean updateRequest = requestService.lambdaUpdate().eq(Request::getRequestId, requestId).set(Request::getStatus, 1).update();
-        if(!updateRequest) {
-            error("服务器异常，请重试");}
+        if (!updateRequest) {
+            error("服务器异常，请重试");
+        }
 
         Registration registration = lambdaQuery().eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
         if (registration != null && registration.getStatus() == 0) {
@@ -201,7 +226,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             error("服务器异常，请重试");
         }
 
-        if(registration==null) {
+        if (registration == null) {
             registration = new Registration();
             registration.setActivityId(activityId);
             registration.setUserId(userId);
@@ -210,10 +235,11 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             if (!save) {
                 error("服务器异常，请重试");
             }
-        }else{
+        } else {
             boolean updateRegistration = lambdaUpdate().eq(Registration::getRegistrationId, registration.getRegistrationId()).set(Registration::getStatus, 0).update();
-            if(!updateRegistration) {
-                error("服务器异常，请重试");}
+            if (!updateRegistration) {
+                error("服务器异常，请重试");
+            }
         }
     }
 
@@ -357,6 +383,46 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     private static void requireOne(int affected) {
         if (affected != 1) {
             error("数据状态已变化，请重试");
+        }
+    }
+
+    @Scheduled(fixedDelay = 30L, timeUnit = TimeUnit.SECONDS)
+    public void solvePendingMessage() {
+        Set<String> range = stringRedisTemplate.opsForZSet().rangeByScore("registration:message:pending", 0L, System.currentTimeMillis());
+
+        for (String requestId : range) {
+            try {
+                Map<Object, Object> map = stringRedisTemplate.opsForHash().entries("registration:message:" + requestId);
+                if (map.isEmpty()) {
+                    log.error("请求id{}异常", requestId);
+                    stringRedisTemplate.opsForZSet().remove("registration:message:pending" , requestId);
+                    continue;
+                }
+                MessageDTO messageDTO = BeanUtil.fillBeanWithMap(map, new MessageDTO(), false);
+                Long result = stringRedisTemplate.execute(REGISTER_ACTIVITY_PENDING_SEND_SCRIPT, List.of("registration:message:" + requestId)
+                        , requestId, Long.toString(System.currentTimeMillis()));
+                if (result == -1) {
+                    log.error("请求id{}脚本参数错误", requestId);
+                    continue;
+                }
+                if (result == -2) {
+                    log.error("请求id{}脚本执行时间异常", requestId);
+                    continue;
+                }
+                if(result == -3) {
+                    log.error("请求id{}重发消息次数已达上限", requestId);
+                    registrationDeadLetterConsumer.updateDatabase(messageDTO);
+
+                    stringRedisTemplate.opsForZSet().remove("registration:message:pending" , requestId);
+                    stringRedisTemplate.delete("registration:message:" + requestId);
+
+                    continue;
+                }
+                rabbitTemplate.convertAndSend("campuspass.direct", "registerActivity",
+                        JSONUtil.toJsonStr(messageDTO));
+            } catch (Exception e) {
+                log.error("请求id{}的消息发送重试出现异常",requestId, e);
+            }
         }
     }
 }

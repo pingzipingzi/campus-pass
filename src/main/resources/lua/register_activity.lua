@@ -1,4 +1,5 @@
-if not ARGV[1] or not ARGV[2] or not KEYS[1] or not KEYS[2] or not ARGV[3] then
+if not ARGV[1] or not ARGV[2] or not KEYS[1] or not KEYS[2] or not KEYS[3] or not ARGV[3]
+        or not ARGV[4] or not ARGV[5] or not KEYS[4] then
     return -1
 end
 
@@ -21,14 +22,21 @@ if result==1 then
     return 2
 end
 
-
+redis.call('zadd',KEYS[4],now+30000,ARGV[2])
 
 redis.call('hset',KEYS[2],'requestId',ARGV[2])
 redis.call('pexpire',KEYS[2],(registrationEndTime-now)+12*60*60*1000+tonumber(ARGV[3])*1000)
 
+redis.call('hset' ,KEYS[3],'requestId',ARGV[2],'sendTime',ARGV[1],'activityId',ARGV[4],
+        'userId',ARGV[5],'isPending',1,'failureTimes',0)
+redis.call('pexpire',KEYS[3],(registrationEndTime-now)+12*60*60*1000+tonumber(ARGV[3])*1000)
+
 if remainCapacity ==0 then
+    redis.call('hset',KEYS[3],'cacheStatus',1)
     return 1
 end
+
+redis.call('hset',KEYS[3],'cacheStatus',0)
 
 redis.call('hincrby',KEYS[1],'remainingCapacity',-1)
 

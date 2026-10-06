@@ -12,11 +12,17 @@ import com.example.campuspass.service.support.ActivityMutationGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.*;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
 
 import static com.example.campuspass.exception.BusinessException.error;
 
@@ -33,6 +39,16 @@ public class RegistrationConsumer {
     private final UserServiceImpl userService;
 
     private final ActivityMutationGuard mutationGuard;
+
+    private final StringRedisTemplate stringRedisTemplate;
+
+    private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_PENDING_SCRIPT;
+
+    static {
+        REGISTER_ACTIVITY_PENDING_SCRIPT = new DefaultRedisScript<>();
+        REGISTER_ACTIVITY_PENDING_SCRIPT.setResultType(Long.class);
+        REGISTER_ACTIVITY_PENDING_SCRIPT.setLocation(new ClassPathResource("lua/register_activity_pending_check.lua"));
+    }
 
     @RabbitListener(bindings = @QueueBinding(value = @Queue(
             value = "campuspass.queue1",
@@ -58,12 +74,26 @@ public class RegistrationConsumer {
         Long activityId = messageDTO.getActivityId();
         Long userId = messageDTO.getUserId();
         String requestId = messageDTO.getRequestId();
-        LocalDateTime sendTime = messageDTO.getSendTime();
+        Long sendTimeStamp = messageDTO.getSendTime();
         Integer cacheStatus = messageDTO.getCacheStatus();
 
-        if (userId == null || activityId == null || requestId == null || sendTime == null ||
+        if (userId == null || activityId == null || requestId == null || sendTimeStamp == null ||
                 cacheStatus == null || (cacheStatus != 0 && cacheStatus != 1)) {
             error("消息接收异常");
+        }
+
+        LocalDateTime sendTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(sendTimeStamp), ZoneId.of("Asia/Shanghai"));
+
+        Long result = stringRedisTemplate.execute(REGISTER_ACTIVITY_PENDING_SCRIPT,
+                List.of("registration:message:" + requestId), requestId);
+        if(result == -1) {log.error("脚本参数异常");
+            error("服务器异常");}
+
+        if (result == -2) {
+            log.warn("请求id{}已发送成功", requestId);
+            Request request = requestService.lambdaQuery().eq(Request::getRequestId, requestId).one();
+            if(request!=null&&request.getStatus()!=0) {
+                return;}
         }
 
         User user = userService.lambdaQuery().eq(User::getUserId, userId).eq(User::getStatus, 0).one();
