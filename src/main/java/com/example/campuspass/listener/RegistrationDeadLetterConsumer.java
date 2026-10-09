@@ -8,7 +8,7 @@ import static com.example.campuspass.exception.BusinessException.error;
 
 import com.example.campuspass.service.IActivityService;
 import com.example.campuspass.service.impl.RequestServiceImpl;
-import com.example.campuspass.service.support.ActivityMutationGuard;
+import com.example.campuspass.service.support.ActivityLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.Exchange;
@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class RegistrationDeadLetterConsumer {
 
-    private final ActivityMutationGuard activityMutationGuard;
+    private final ActivityLock activityLock;
 
     private final RequestServiceImpl requestService;
 
@@ -86,7 +86,7 @@ public class RegistrationDeadLetterConsumer {
             error("消息接收异常");
         }
 
-        Activity activity = activityMutationGuard.lock(activityId);
+        Activity activity = activityLock.lock(activityId);
 
         Request request = requestService.lambdaQuery().eq(Request::getRequestId, requestId).one();
 

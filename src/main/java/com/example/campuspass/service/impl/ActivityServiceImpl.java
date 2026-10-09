@@ -5,7 +5,6 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.campuspass.dto.ActivityDTO;
 import com.example.campuspass.dto.ActivityOfRegistrationDTO;
 import com.example.campuspass.dto.Result;
@@ -15,9 +14,9 @@ import com.example.campuspass.entity.User;
 import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.mapper.ActivityMapper;
 import com.example.campuspass.service.IActivityService;
-import com.example.campuspass.mapper.RegistrationMapper;
-import com.example.campuspass.mapper.WaitListMapper;
-import com.example.campuspass.service.support.ActivityMutationGuard;
+import com.example.campuspass.service.IRegistrationService;
+import com.example.campuspass.service.IWaitListService;
+import com.example.campuspass.service.support.ActivityLock;
 import com.example.campuspass.utils.RedissonUtils;
 import com.example.campuspass.utils.enums.ActivityTypeEnum;
 import com.example.campuspass.utils.lua_execute.ExecuteSaveHashMapLua;
@@ -57,13 +56,14 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     private ActivityServiceImpl self;
 
     @Autowired
-    private ActivityMutationGuard mutationGuard;
+    private ActivityLock mutationGuard;
 
     @Autowired
-    private RegistrationMapper registrationMapper;
+    private IWaitListService waitListService;
 
     @Autowired
-    private WaitListMapper waitListMapper;
+    @Lazy
+    private IRegistrationService registrationService;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -228,12 +228,12 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
             error("活动取消失败");
         }
         // 没有报名或候补时更新零行是正常情况；SQL 异常仍会使整个事务回滚。
-        waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+        waitListService.lambdaUpdate()
                 .eq(WaitList::getActivityId, activity.getActivityId()).eq(WaitList::getStatus, 0)
-                .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
-        registrationMapper.update(null, Wrappers.<Registration>lambdaUpdate()
+                .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null).update();
+        registrationService.lambdaUpdate()
                 .eq(Registration::getActivityId, activity.getActivityId()).eq(Registration::getStatus, 0)
-                .set(Registration::getStatus, 2));
+                .set(Registration::getStatus, 2).update();
     }
 
     public static void checkIfAdmin() {

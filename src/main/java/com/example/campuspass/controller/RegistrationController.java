@@ -18,7 +18,7 @@ public class RegistrationController {
     private IRegistrationService registrationService;
 
     @PostMapping("/{activityId}")
-    public Result<Void> registerActivity(@PathVariable("activityId") Long activityId) {
+    public Result<String> registerActivity(@PathVariable("activityId") Long activityId) {
         return registrationService.registerActivity(activityId);
     }
 

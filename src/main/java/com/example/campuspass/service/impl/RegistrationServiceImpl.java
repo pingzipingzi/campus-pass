@@ -2,7 +2,6 @@ package com.example.campuspass.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.json.JSONUtil;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.campuspass.dto.MessageDTO;
@@ -10,21 +9,23 @@ import com.example.campuspass.dto.Result;
 import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.entity.*;
 import com.example.campuspass.listener.RegistrationDeadLetterConsumer;
-import com.example.campuspass.mapper.*;
+import com.example.campuspass.mapper.RegistrationMapper;
 import com.example.campuspass.service.*;
-import com.example.campuspass.service.support.ActivityMutationGuard;
+import com.example.campuspass.service.support.ActivityLock;
+import com.example.campuspass.service.support.UserLock;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.RegistrationVO;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.annotation.*;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -43,13 +44,7 @@ import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Registration>
         implements IRegistrationService {
     @Autowired
-    private ActivityMapper activityMapper;
-    @Autowired
-    private WaitListMapper waitListMapper;
-    @Autowired
-    private UserMapper userMapper;
-    @Autowired
-    private ActivityMutationGuard mutationGuard;
+    private ActivityLock mutationGuard;
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
@@ -61,9 +56,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     @Autowired
     private IUserService userService;
     @Autowired
-    private IRequestService requestService;
+    private RequestServiceImpl requestService;
+    @Autowired
+    private UserLock userLock;
     @Autowired
     private RegistrationDeadLetterConsumer registrationDeadLetterConsumer;
+    @Autowired
+    @Lazy
+    private RegistrationServiceImpl self;
     private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_SCRIPT;
     private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_PENDING_SEND_SCRIPT;
     static {
@@ -82,14 +82,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     @Transactional(readOnly = true)
     public Result<RegistrationVO> getRegistrationStatus(Long activityId) {
         Long userId = currentUserId();
-        Activity activity = activityMapper.selectById(activityId);
+        Activity activity = activityService.getById(activityId);
         if (activity == null) {
             error("活动不存在");
         }
-        Registration registration = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
-                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
-        WaitList waiting = waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
-                .eq(WaitList::getActivityId, activityId).eq(WaitList::getUserId, userId));
+        Registration registration = lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
+        WaitList waiting = waitListService.lambdaQuery()
+                .eq(WaitList::getActivityId, activityId).eq(WaitList::getUserId, userId).one();
         RegistrationVO vo = registration == null ? new RegistrationVO()
                 : BeanUtil.copyProperties(registration, RegistrationVO.class);
         vo.setActivityId(activityId);
@@ -125,10 +125,10 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     }
 
     @Override
-    public Result<Void> registerActivity(Long activityId) {
+    public Result<String> registerActivity(Long activityId) {
         Long userId = currentUserId();
 
-        User user = userMapper.selectById(userId);
+        User user = userService.getById(userId);
         if (user == null || !Integer.valueOf(0).equals(user.getStatus())) {
             error("账号不可用");
         }
@@ -172,13 +172,13 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             messageDTO.setCacheStatus(1);
             rabbitTemplate.convertAndSend("campuspass.direct", "registerActivity",
                     JSONUtil.toJsonStr(messageDTO));
-            return Result.ok("报名人数已满，已自动帮您提交候补请求");
+            return Result.okWithMessage("报名人数已满，已自动帮您提交候补请求",requestId);
         }
 
         messageDTO.setCacheStatus(0);
         rabbitTemplate.convertAndSend("campuspass.direct", "registerActivity",
                 JSONUtil.toJsonStr(messageDTO));
-        return Result.ok("报名请求提交成功");
+        return Result.okWithMessage("报名请求提交成功",requestId);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -208,11 +208,11 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
                     error("服务器异常，请重试");
                 }
             } else {
-                if (candidate.getStatus() != 2) {
+                if (candidate.getStatus() == 0) {
                     error("您已经报名过了");
                 }
                 boolean update = waitListService.lambdaUpdate().eq(WaitList::getWaitId, candidate.getWaitId()).set(WaitList::getStatus, 0)
-                        .set(WaitList::getJoinTime, LocalDateTime.now()).update();
+                        .set(WaitList::getJoinTime, LocalDateTime.now()).set(WaitList::getPromotedTime, null).update();
                 if (!update) {
                     error("服务器异常，请重试");
                 }
@@ -244,35 +244,42 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     }
 
     @Override
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> cancelRegistration(Long activityId) {
 
         Long userId = currentUserId();
+        return self.removeRegistration(activityId, userId);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public Result<Void> removeRegistration(Long activityId, Long userId) {
         Activity activity = mutationGuard.lock(activityId);
-        Registration registration = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
-                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
+        Registration registration = lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
         if (registration == null || registration.getStatus() != 0) {
-            error("您当前没有成功报名，不能释放名额");
+            error("用户当前没有成功报名，不能释放名额");
         }
-        requireOne(baseMapper.update(null, Wrappers.<Registration>lambdaUpdate()
+
+        requireSuccess(lambdaUpdate()
                 .eq(Registration::getRegistrationId, registration.getRegistrationId())
-                .eq(Registration::getStatus, 0).set(Registration::getStatus, 1)));
+                .eq(Registration::getStatus, 0).set(Registration::getStatus, 1).update());
         if (activity.getRemainingCapacity() >= activity.getTotalCapacity()) {
             error("活动名额数据异常");
         }
-        requireOne(activityMapper.update(null, Wrappers.<Activity>lambdaUpdate()
+        requireSuccess(activityService.lambdaUpdate()
                 .eq(Activity::getActivityId, activityId)
                 .apply("remaining_capacity < total_capacity")
-                .setSql("remaining_capacity = remaining_capacity + 1")));
+                .setSql("remaining_capacity = remaining_capacity + 1").update());
         activity.setRemainingCapacity(activity.getRemainingCapacity() + 1);
         // 截止后允许取消，但不再递补；候补已转正记录保留为历史，不改成已取消。
+        int tag = 1;
         if (activity.getStatus() == 1 && LocalDateTime.now().isBefore(activity.getRegistrationEndTime())) {
-            promoteAvailable(activity);
+            tag = promoteAvailable(activity);
         } else {
-            waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+            waitListService.lambdaUpdate()
                     .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
-                    .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
+                    .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null).update();
         }
+        requestService.removeRequestCacheAfterCommit(activityId, userId, tag);
         return Result.ok();
     }
 
@@ -296,79 +303,73 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
                 result.getSize(), result.getPages(), list));
     }
 
-    private static void checkActivityRegistrationTime(Activity activity) {
-        if (!Integer.valueOf(1).equals(activity.getStatus())) {
-            error("活动未发布或已取消");
-        }
-        LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(activity.getRegistrationStartTime())) {
-            error("活动报名未开始");
-        }
-        if (!now.isBefore(activity.getRegistrationEndTime())) {
-            error("活动报名已截止");
-        }
-    }
-
     // 报名和取消报名共用递补流程，统一候补顺序和账号状态校验。
-    private void promoteAvailable(Activity activity) {
-        while (activity.getRemainingCapacity() > 0) {
+    private int promoteAvailable(Activity activity) {
             if (!LocalDateTime.now().isBefore(activity.getRegistrationEndTime())) {
-                waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                waitListService.lambdaUpdate()
                         .eq(WaitList::getActivityId, activity.getActivityId()).eq(WaitList::getStatus, 0)
-                        .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
-                break;
+                        .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null).update();
+                return 1;
             }
-            WaitList head = waitListMapper.selectOne(Wrappers.<WaitList>lambdaQuery()
+            WaitList head = waitListService.lambdaQuery()
                     .eq(WaitList::getActivityId, activity.getActivityId()).eq(WaitList::getStatus, 0)
-                    .orderByAsc(WaitList::getJoinTime, WaitList::getWaitId).last("LIMIT 1"));
+                    .orderByAsc(WaitList::getJoinTime, WaitList::getWaitId).last("LIMIT 1").one();
             if (head == null) {
-                break;
+                return 1;
             }
-            User candidate = userMapper.selectById(head.getUserId());
+            User candidate = userService.lambdaQuery().eq(User::getUserId, head.getUserId()).one();
             if (candidate == null || !Integer.valueOf(0).equals(candidate.getStatus())) {
-                requireOne(waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+                requireSuccess(waitListService.lambdaUpdate()
                         .eq(WaitList::getWaitId, head.getWaitId()).eq(WaitList::getStatus, 0)
-                        .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null)));
-                continue;
+                        .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null).update());
+                requestService.removeRequestCacheAfterCommit(activity.getActivityId(), head.getUserId(), 0);
+                return promoteAvailable(activity);
             }
+
+            candidate = userLock.lock(head.getUserId());
+            if (candidate == null || !Integer.valueOf(0).equals(candidate.getStatus())) {
+                log.error("候补用户id{}状态已变化", head.getUserId());
+                error("服务器异常");
+            }
+
             activateRegistration(activity.getActivityId(), head.getUserId());
             LocalDateTime promotedTime = LocalDateTime.now();
             if (promotedTime.isBefore(head.getJoinTime())) {
                 promotedTime = head.getJoinTime();
             }
-            requireOne(waitListMapper.update(null, Wrappers.<WaitList>lambdaUpdate()
+            requireSuccess(waitListService.lambdaUpdate()
                     .eq(WaitList::getWaitId, head.getWaitId()).eq(WaitList::getStatus, 0)
-                    .set(WaitList::getStatus, 1).set(WaitList::getPromotedTime, promotedTime)));
+                    .set(WaitList::getStatus, 1).set(WaitList::getPromotedTime, promotedTime).update());
             takeSeat(activity);
-        }
+            return 0;
     }
 
-    // 直接报名和候补转正共用：创建或恢复报名关系。
+
     private void activateRegistration(Long activityId, Long userId) {
-        Registration existing = baseMapper.selectOne(Wrappers.<Registration>lambdaQuery()
-                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId));
+        Registration existing = lambdaQuery()
+                .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
         if (existing == null) {
             Registration registration = new Registration();
             registration.setActivityId(activityId);
             registration.setUserId(userId);
             registration.setStatus(0);
-            requireOne(baseMapper.insert(registration));
+            requireSuccess(save(registration));
         } else {
-            requireOne(baseMapper.update(null, Wrappers.<Registration>lambdaUpdate()
+            requireSuccess(lambdaUpdate()
                     .eq(Registration::getRegistrationId, existing.getRegistrationId())
-                    .in(Registration::getStatus, 1, 2).set(Registration::getStatus, 0)));
+                    .in(Registration::getStatus, 1, 2).set(Registration::getStatus, 0).update());
         }
     }
 
     // 扣减时再次校验时间和余量，失败由外层事务回滚。
     private void takeSeat(Activity activity) {
         LocalDateTime now = LocalDateTime.now();
-        requireOne(activityMapper.update(null, Wrappers.<Activity>lambdaUpdate()
+        requireSuccess(activityService.lambdaUpdate()
                 .eq(Activity::getActivityId, activity.getActivityId())
                 .eq(Activity::getStatus, 1).gt(Activity::getRemainingCapacity, 0)
                 .le(Activity::getRegistrationStartTime, now)
                 .gt(Activity::getRegistrationEndTime, now)
-                .setSql("remaining_capacity = remaining_capacity - 1")));
+                .setSql("remaining_capacity = remaining_capacity - 1").update());
         activity.setRemainingCapacity(activity.getRemainingCapacity() - 1);
     }
 
@@ -380,8 +381,8 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         return user.getUserId();
     }
 
-    private static void requireOne(int affected) {
-        if (affected != 1) {
+    private static void requireSuccess(boolean success) {
+        if (!success) {
             error("数据状态已变化，请重试");
         }
     }

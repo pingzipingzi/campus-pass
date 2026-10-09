@@ -5,18 +5,27 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.dto.UserDTO;
+import com.example.campuspass.entity.Registration;
 import com.example.campuspass.entity.User;
+import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.mapper.UserMapper;
 import com.example.campuspass.service.IUserService;
+import com.example.campuspass.service.support.UserLock;
 import com.example.campuspass.utils.RegexUtils;
 import com.example.campuspass.utils.lua_execute.ExecuteSaveHashMapLua;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.UserVO;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -27,6 +36,7 @@ import static com.example.campuspass.utils.RedisConstants.USER_CACHE_TTL_SECONDS
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
 
 @Service
+@Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
 
     private static final Integer USER_PAGE_SIZE = 10;
@@ -36,6 +46,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Lazy
+    @Autowired
+    private RegistrationServiceImpl registrationService;
+
+    @Autowired
+    private WaitListServiceImpl waitListService;
+
+    @Autowired
+    private UserLock userLock;
+
 
     @Override
     public Result<PageResultVO<UserVO>> PageAllUsersForAdmin(Integer pages) {
@@ -49,9 +70,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> disableUserForAdmin(Long userId) {
         checkIfAdmin();
-        User user = lambdaQuery().eq(User::getUserId, userId).one();
+        User user = userLock.lock(userId);
         if (user == null) {
             error("用户不存在");
         }
@@ -62,18 +84,70 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (!success) {
             error("数据更新失败");
         }
-        refreshCacheUser( user,1);
 
+        List<Registration> list = registrationService.lambdaQuery().eq(Registration::getUserId, userId).eq(Registration::getStatus, 0).list();
+
+        List<WaitList> waitLists = waitListService.lambdaQuery().eq(WaitList::getUserId, userId).
+                eq(WaitList::getStatus, 0).list();
+
+        refreshCacheUserAfterCommit(user, 1);
+        cleanRegistration(list,user);
+        cleanWaitList(waitLists, user);
         return Result.ok();
 
     }
 
+    public void cleanRegistration(List<Registration> list, User user) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                for (Registration registration : list) {
+                    try {
+                        if (registration == null ) {
+                            log.error("用户id{}禁用时处理报名消息异常", user.getUserId());
+                            error("报名记录为空");
+                        }
+                        registrationService.removeRegistration(registration.getActivityId(), user.getUserId());
+                    } catch (Exception e) {
+                        if (registration != null) {
+                            log.error("报名id{}信息清理失败", registration.getRegistrationId(), e);
+                        }else{
+                            log.error("用户id{}禁用时处理报名消息异常", user.getUserId(), e);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
+    public void cleanWaitList(List<WaitList> list, User user) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
+            @Override
+            public void afterCommit() {
+                for(WaitList waitList : list){
+                    try {
+                        if (waitList == null ) {
+                            log.error("用户id{}禁用时处理候补记录异常", user.getUserId());
+                            error("候补记录为空");
+                        }
+                        waitListService.removeWaitList(waitList.getActivityId(), user.getUserId(), 1);
+                    }catch (Exception e){
+                        if(waitList != null){
+                            log.error("候补记录id{}取消失败", waitList.getWaitId(), e);
+                        }else{
+                            log.error("用户id{}禁用时处理候补记录异常", user.getUserId(), e);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> enableUserForAdmin(Long userId) {
         checkIfAdmin();
-        User user = lambdaQuery().eq(User::getUserId, userId).one();
+        User user = userLock.lock(userId);
         if (user == null) {
             error("用户不存在");
         }
@@ -84,7 +158,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (!success) {
             error("数据更新失败");
         }
-        refreshCacheUser(user, 0);
+        refreshCacheUserAfterCommit(user, 0);
         return Result.ok();
     }
 
@@ -133,12 +207,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         return userDTO.getUserId();
     }
-    public void refreshCacheUser( User user,Integer status) {
-        user.setStatus(status);
-        String key = USER_CACHE_KEY_PREFIX + user.getUserId();
-        Map<String, Object> map = BeanUtil.beanToMap(BeanUtil.copyProperties(user, UserDTO.class));
+    public void refreshCacheUserAfterCommit(User user, Integer status) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
+            @Override
+            public void afterCommit() {
+                try {
+                    user.setStatus(status);
+                    String key = USER_CACHE_KEY_PREFIX + user.getUserId();
+                    Map<String, Object> map = BeanUtil.beanToMap(BeanUtil.copyProperties(user, UserDTO.class));
 
-        executeSaveHashMapLua.executeScript(map,key,USER_CACHE_TTL_SECONDS);
+                    executeSaveHashMapLua.executeScript(map, key, USER_CACHE_TTL_SECONDS);
+                } catch (Exception e) {
+                    log.error("用户id{}缓存更新失败", user.getUserId(), e);
+                }
+            }
+        });
     }
 
     public static void checkIfAdmin() {

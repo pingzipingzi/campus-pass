@@ -9,7 +9,7 @@ import com.example.campuspass.vo.RegistrationVO;
 public interface IRegistrationService extends IService<Registration> {
     Result<RegistrationVO> getRegistrationStatus(Long activityId);
 
-    Result<Void> registerActivity(Long activityId);
+    Result<String> registerActivity(Long activityId);
 
     Result<Void> cancelRegistration(Long activityId);
 

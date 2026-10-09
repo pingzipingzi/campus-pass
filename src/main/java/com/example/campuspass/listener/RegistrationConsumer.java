@@ -8,7 +8,8 @@ import com.example.campuspass.entity.User;
 import com.example.campuspass.service.impl.RegistrationServiceImpl;
 import com.example.campuspass.service.impl.RequestServiceImpl;
 import com.example.campuspass.service.impl.UserServiceImpl;
-import com.example.campuspass.service.support.ActivityMutationGuard;
+import com.example.campuspass.service.support.ActivityLock;
+import com.example.campuspass.service.support.UserLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.*;
@@ -38,11 +39,13 @@ public class RegistrationConsumer {
 
     private final UserServiceImpl userService;
 
-    private final ActivityMutationGuard mutationGuard;
+    private final ActivityLock mutationGuard;
 
     private final StringRedisTemplate stringRedisTemplate;
 
     private static final DefaultRedisScript<Long> REGISTER_ACTIVITY_PENDING_SCRIPT;
+
+    private final UserLock userLock;
 
     static {
         REGISTER_ACTIVITY_PENDING_SCRIPT = new DefaultRedisScript<>();
@@ -96,14 +99,17 @@ public class RegistrationConsumer {
                 return;}
         }
 
-        User user = userService.lambdaQuery().eq(User::getUserId, userId).eq(User::getStatus, 0).one();
-        if (user == null) {
-            error("用户异常");
-        }
         Activity activity = mutationGuard.lock(activityId);
 
         if (activity == null || activity.getStatus() != 1) {
             error("活动异常");
+        }
+
+
+        User user = userLock.lock(userId);
+
+        if (user == null||!Integer.valueOf(0).equals(user.getStatus())) {
+            error("用户异常");
         }
 
         if (sendTime.isAfter(activity.getRegistrationEndTime())

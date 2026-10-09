@@ -11,10 +11,10 @@ import static com.example.campuspass.exception.BusinessException.error;
 
 @Component
 @RequiredArgsConstructor
-public class ActivityMutationGuard {
+public class ActivityLock {
     private final ActivityMapper activityMapper;
 
-    @Transactional(propagation = Propagation.MANDATORY)
+    @Transactional(propagation = Propagation.MANDATORY)//传播等级是必须在已有事务中运行
     public Activity lock(Long activityId) {
         Activity activity = activityMapper.selectForUpdate(activityId);
         if (activity == null) {
