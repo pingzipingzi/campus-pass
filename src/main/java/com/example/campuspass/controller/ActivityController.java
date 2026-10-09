@@ -50,7 +50,7 @@ public class ActivityController {
         return activityService.getMyActivityPageList(pages);
     }
 
-    @PutMapping("/{activityId}")
+    @PutMapping("/activityId/{activityId}")
     public Result<Void> updateActivityDraft(@Valid @RequestBody ActivityDTO activityDTO
             , @NotNull @PathVariable("activityId") Long activityId) {
         return activityService.updateActivityDraft(activityDTO, activityId);
@@ -66,5 +66,21 @@ public class ActivityController {
         return activityService.cancelActivity(activityId);
     }
 
+    @GetMapping("/activityType/{activityType}")
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(@Min(0) @Max(5) @PathVariable("activityType") Integer activityType,
+                                                                    @Min(1) @RequestParam("pages") Integer pages) {
+        return activityService.getActivityPageList(activityType, pages);
+    }
+
+    @GetMapping("/keyword")
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(@RequestParam("keyword") String keyword, @Min(1) @RequestParam("pages") Integer pages) {
+        return activityService.getActivityPageList(keyword, pages);
+    }
+
+    @GetMapping("/keyword/{activityType}")
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(@Min(0) @Max(5) @PathVariable("activityType") Integer activityType,
+                                                                    @RequestParam("keyword") String keyword, @Min(1) @RequestParam("pages") Integer pages) {
+        return activityService.getActivityPageList(activityType,keyword, pages);
+    }
 
 }

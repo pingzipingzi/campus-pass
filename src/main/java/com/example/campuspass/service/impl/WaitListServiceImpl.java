@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.entity.Activity;
 import com.example.campuspass.service.support.ActivityLock;
 import com.example.campuspass.dto.Result;
@@ -12,6 +13,7 @@ import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.mapper.WaitListMapper;
 import com.example.campuspass.service.IWaitListService;
 import com.example.campuspass.vo.PageResultVO;
+import com.example.campuspass.vo.RegistrationVO;
 import com.example.campuspass.vo.WaitListVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +25,7 @@ import org.springframework.transaction.annotation.Isolation;
 
 import java.util.List;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
@@ -42,6 +45,10 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     @Autowired
     @Lazy
     private WaitListServiceImpl self;
+
+    @Lazy
+    @Autowired
+    private ActivityServiceImpl activityService;
 
     @Override
     public Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages) {
@@ -97,5 +104,25 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
                     .eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus, 0)
                     .set(WaitList::getStatus, 3).set(WaitList::getPromotedTime, null));
         }
+    }
+
+    @Override
+    public Result<PageResultVO<WaitListVO>> pageWaitListOfMyActivity(Integer pages, Long activityId) {
+        UserDTO userDTO = USER_THREAD_LOCAL.get();
+        if(userDTO == null) {
+            error("用户未登录");}
+        Long userId = userDTO.getUserId();
+        Activity activity = activityService.lambdaQuery().eq(Activity::getActivityId, activityId).one();
+        if (activity == null || !Integer.valueOf(1).equals(activity.getStatus())) {
+            error("活动状态异常");
+        }
+        if (!Objects.equals(activity.getCreatorId(), userId) && userDTO.getRole() != 1) {
+            error("用户权限不足");
+        }
+
+        Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
+        Page<WaitList> result = lambdaQuery().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0).orderByAsc(WaitList::getJoinTime,WaitList::getWaitId).page(page);
+        List<WaitListVO> list = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, WaitListVO.class)).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), list));
     }
 }

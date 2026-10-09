@@ -5,6 +5,7 @@ import com.example.campuspass.service.IRequestService;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.RequestVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,7 +23,7 @@ public class RequestController {
     }
 
     @GetMapping("/mine")
-    public Result<PageResultVO<RequestVO>> pageMyRequest(@RequestParam("pages") Integer pages) {
+    public Result<PageResultVO<RequestVO>> pageMyRequest(@Min(1) @RequestParam("pages") Integer pages) {
         return requestService.pageMyRequest(pages);
     }
 }

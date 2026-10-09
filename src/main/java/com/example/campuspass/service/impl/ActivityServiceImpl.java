@@ -209,6 +209,37 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     }
 
     @Override
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(String keyword, Integer pages) {
+        if(StrUtil.isBlank(keyword)){
+            error("关键词不能为空");
+        }
+        Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
+        Page<Activity> result = lambdaQuery().eq(Activity::getStatus, 1).like(Activity::getActivityName, keyword).orderByDesc(Activity::getActivityId).page(page);
+        List<ActivityPageVO> pageVOList = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, ActivityPageVO.class)).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), pageVOList));
+    }
+
+    @Override
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(Integer activityType, String keyword, Integer pages) {
+        if(StrUtil.isBlank(keyword)){
+            error("关键词不能为空");
+        }
+        Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
+        Page<Activity> result = lambdaQuery().eq(Activity::getActivityType, activityType).eq(Activity::getStatus, 1).like(Activity::getActivityName, keyword).
+                orderByDesc(Activity::getActivityId).page(page);
+        List<ActivityPageVO> pageVOList = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, ActivityPageVO.class)).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), pageVOList));
+    }
+
+    @Override
+    public Result<PageResultVO<ActivityPageVO>> getActivityPageList(Integer activityType, Integer pages) {
+        Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
+        Page<Activity> result = lambdaQuery().eq(Activity::getActivityType, activityType).eq(Activity::getStatus, 1).orderByDesc(Activity::getActivityId).page(page);
+        List<ActivityPageVO> pageVOList = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, ActivityPageVO.class)).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), pageVOList));
+    }
+
+    @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result<Void> forceCancelActivityForAdmin(Long activityId) {
         checkIfAdmin();

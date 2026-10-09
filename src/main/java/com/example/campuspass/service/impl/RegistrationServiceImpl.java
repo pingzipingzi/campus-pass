@@ -29,10 +29,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -283,6 +280,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         return Result.ok();
     }
 
+
     @Override
     public Result<PageResultVO<RegistrationVO>> pageMyRegistration(Integer pages) {
         if (pages == null || pages < 1) {
@@ -301,6 +299,26 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         }).toList();
         return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(),
                 result.getSize(), result.getPages(), list));
+    }
+
+    @Override
+    public Result<PageResultVO<RegistrationVO>> pageRegistrationsOfMyActivity(Integer pages, Long activityId) {
+        UserDTO userDTO = USER_THREAD_LOCAL.get();
+        if(userDTO == null) {
+            error("用户未登录");}
+        Long userId = userDTO.getUserId();
+        Activity activity = activityService.lambdaQuery().eq(Activity::getActivityId, activityId).one();
+        if (activity == null || !Integer.valueOf(1).equals(activity.getStatus())) {
+            error("活动状态异常");
+        }
+        if (!Objects.equals(activity.getCreatorId(), userId) && userDTO.getRole() != 1) {
+            error("用户权限不足");
+        }
+
+        Page<Registration> page = new Page<>(pages, PAGE_SIZE);
+        Page<Registration> result = lambdaQuery().eq(Registration::getActivityId, activityId).eq(Registration::getStatus, 0).orderByAsc(Registration::getRegistrationId).page(page);
+        List<RegistrationVO> list = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, RegistrationVO.class)).toList();
+        return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), list));
     }
 
     // 报名和取消报名共用递补流程，统一候补顺序和账号状态校验。

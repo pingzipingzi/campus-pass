@@ -7,6 +7,8 @@ import com.example.campuspass.entity.Activity;
 import com.example.campuspass.vo.ActivityPageVO;
 import com.example.campuspass.vo.ActivityVO;
 import com.example.campuspass.vo.PageResultVO;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 
@@ -30,4 +32,10 @@ public interface IActivityService extends IService<Activity> {
     Result<PageResultVO<ActivityPageVO>> pageAllActivitiesForAdmin(Integer pages);
 
     Result<Void> forceCancelActivityForAdmin(Long activityId);
+
+    Result<PageResultVO<ActivityPageVO>> getActivityPageList(Integer activityType, Integer pages);
+
+    Result<PageResultVO<ActivityPageVO>> getActivityPageList(String keyword, @Min(1) Integer pages);
+
+    Result<PageResultVO<ActivityPageVO>> getActivityPageList(@Min(0) @Max(5) Integer activityType, String keyword, @Min(1) Integer pages);
 }

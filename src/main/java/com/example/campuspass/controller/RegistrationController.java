@@ -6,6 +6,7 @@ import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.RegistrationVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,7 +29,7 @@ public class RegistrationController {
     }
 
     @GetMapping("/mine")
-    public Result<PageResultVO<RegistrationVO>> pageMyRegistration(@RequestParam("pages") Integer pages) {
+    public Result<PageResultVO<RegistrationVO>> pageMyRegistration(@Min(1)@RequestParam("pages") Integer pages) {
         return registrationService.pageMyRegistration(pages);
     }
 
@@ -38,6 +39,10 @@ public class RegistrationController {
         return registrationService.getRegistrationStatus(activityId);
     }
 
+    @GetMapping("/mine/activity/{activityId}")
+    public Result<PageResultVO<RegistrationVO>> getMyRegistration(@Min(1) @RequestParam("pages") Integer pages, @PathVariable("activityId") Long activityId) {
+        return registrationService.pageRegistrationsOfMyActivity(pages, activityId);
+    }
 
 
 }
