@@ -289,13 +289,21 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         }
         Page<Registration> result = lambdaQuery().eq(Registration::getUserId, currentUserId())
                 .orderByDesc(Registration::getRegistrationId).page(new Page<>(pages, PAGE_SIZE));
+        Set<Long> activityIds = result.getRecords().stream().map(Registration::getActivityId).collect(java.util.stream.Collectors.toSet());
+        Map<Long, Activity> activities = activityIds.isEmpty() ? Map.of()
+                : activityService.listByIds(activityIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Activity::getActivityId, activity -> activity));
         List<RegistrationVO> list = result.getRecords().stream().map(record -> {
             RegistrationVO vo = BeanUtil.copyProperties(record, RegistrationVO.class);
-            vo.setStatusDescription(switch (record.getStatus()) {
-                case 0 -> "已报名";
-                case 1 -> "已取消报名";
-                default -> "报名已失效";
-            });
+            Activity activity = activities.get(record.getActivityId());
+            vo.setActivityName(activity == null ? null : activity.getActivityName());
+            vo.setStatusDescription(activity != null && Integer.valueOf(2).equals(activity.getStatus())
+                    ? "活动已取消"
+                    : switch (record.getStatus()) {
+                        case 0 -> "已报名";
+                        case 1 -> "已取消报名";
+                        default -> "报名已失效";
+                    });
             return vo;
         }).toList();
         return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(),
@@ -318,7 +326,18 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
 
         Page<Registration> page = new Page<>(pages, PAGE_SIZE);
         Page<Registration> result = lambdaQuery().eq(Registration::getActivityId, activityId).eq(Registration::getStatus, 0).orderByAsc(Registration::getRegistrationId).page(page);
-        List<RegistrationVO> list = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, RegistrationVO.class)).toList();
+        Set<Long> userIds = result.getRecords().stream().map(Registration::getUserId).collect(java.util.stream.Collectors.toSet());
+        Map<Long, User> users = userIds.isEmpty() ? Map.of()
+                : userService.listByIds(userIds).stream().collect(java.util.stream.Collectors.toMap(User::getUserId, user -> user));
+        List<RegistrationVO> list = result.getRecords().stream().map(record -> {
+            RegistrationVO vo = BeanUtil.copyProperties(record, RegistrationVO.class);
+            User participant = users.get(record.getUserId());
+            if (participant != null) {
+                vo.setUserName(participant.getUserName());
+                vo.setStudentId(participant.getStudentId());
+            }
+            return vo;
+        }).toList();
         return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), list));
     }
 

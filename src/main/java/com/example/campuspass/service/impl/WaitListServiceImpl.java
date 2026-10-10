@@ -13,6 +13,7 @@ import com.example.campuspass.entity.User;
 import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.mapper.WaitListMapper;
 import com.example.campuspass.service.IWaitListService;
+import com.example.campuspass.service.IUserService;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.WaitListVO;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
@@ -50,6 +54,9 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     @Autowired
     private ActivityServiceImpl activityService;
 
+    @Autowired
+    private IUserService userService;
+
     @Override
     public Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages) {
         if (pages == null || pages < 1) {
@@ -58,9 +65,21 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         Page<WaitList> result = lambdaQuery().eq(WaitList::getUserId, user.getUserId()).orderByDesc(WaitList::getWaitId).page(page);
-        List<WaitListVO> list =
-                result.getRecords().stream()
-                        .map(elem -> BeanUtil.copyProperties(elem, WaitListVO.class)).toList();
+        Set<Long> activityIds = result.getRecords().stream().map(WaitList::getActivityId).collect(Collectors.toSet());
+        Map<Long, String> activityNames = activityIds.isEmpty() ? Map.of()
+                : activityService.listByIds(activityIds).stream()
+                .collect(Collectors.toMap(Activity::getActivityId, Activity::getActivityName));
+        List<WaitListVO> list = result.getRecords().stream().map(record -> {
+            WaitListVO vo = BeanUtil.copyProperties(record, WaitListVO.class);
+            vo.setActivityName(activityNames.get(record.getActivityId()));
+            vo.setStatusDescription(switch (record.getStatus()) {
+                case 0 -> "候补中";
+                case 1 -> "已转正";
+                case 2 -> "已取消候补";
+                default -> "候补已失效";
+            });
+            return vo;
+        }).toList();
         return Result.ok(new PageResultVO<>(result.getTotal()
                 , result.getCurrent(), result.getSize(), result.getPages(), list));
     }
@@ -122,7 +141,18 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
 
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
         Page<WaitList> result = lambdaQuery().eq(WaitList::getActivityId, activityId).eq(WaitList::getStatus,0).orderByAsc(WaitList::getJoinTime,WaitList::getWaitId).page(page);
-        List<WaitListVO> list = result.getRecords().stream().map(elem -> BeanUtil.copyProperties(elem, WaitListVO.class)).toList();
+        Set<Long> userIds = result.getRecords().stream().map(WaitList::getUserId).collect(Collectors.toSet());
+        Map<Long, User> users = userIds.isEmpty() ? Map.of()
+                : userService.listByIds(userIds).stream().collect(Collectors.toMap(User::getUserId, user -> user));
+        List<WaitListVO> list = result.getRecords().stream().map(record -> {
+            WaitListVO vo = BeanUtil.copyProperties(record, WaitListVO.class);
+            User participant = users.get(record.getUserId());
+            if (participant != null) {
+                vo.setUserName(participant.getUserName());
+                vo.setStudentId(participant.getStudentId());
+            }
+            return vo;
+        }).toList();
         return Result.ok(new PageResultVO<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getPages(), list));
     }
 }

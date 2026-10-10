@@ -10,7 +10,13 @@ public class RegistrationVO {
 
     private Long activityId;
 
+    private String activityName;
+
     private Long userId;
+
+    private String userName;
+
+    private String studentId;
 
     private Integer status;
 

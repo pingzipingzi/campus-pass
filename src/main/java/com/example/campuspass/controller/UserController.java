@@ -1,9 +1,7 @@
 package com.example.campuspass.controller;
 
 import com.example.campuspass.dto.ChangePasswordDTO;
-import com.example.campuspass.dto.ForgetPasswordDTO;
 import com.example.campuspass.dto.Result;
-import com.example.campuspass.dto.UserDTO;
 import com.example.campuspass.service.IAuthService;
 import com.example.campuspass.service.IUserService;
 import com.example.campuspass.vo.UserVO;

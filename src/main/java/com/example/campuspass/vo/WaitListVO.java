@@ -1,6 +1,5 @@
 package com.example.campuspass.vo;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -11,9 +10,17 @@ public class WaitListVO {
 
     private Long activityId;
 
+    private String activityName;
+
     private Long userId;
 
+    private String userName;
+
+    private String studentId;
+
     private Integer status;
+
+    private String statusDescription;
 
     private LocalDateTime joinTime;
 
