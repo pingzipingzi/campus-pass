@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
@@ -78,7 +79,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     public Result<Void> createActivity(ActivityDTO activityDTO) {
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         Activity activity = BeanUtil.copyProperties(activityDTO, Activity.class);
         Long userId = user.getUserId();
@@ -98,14 +99,14 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         String key = ACTIVITY_DETAIL_KEY_PREFIX + activityId;
         String jsonStr = stringRedisTemplate.opsForValue().get(key);
         if (CACHE_NOT_FOUND_VALUE.equals(jsonStr)) {
-            error("活动不存在");
+            error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
         }
         ActivityVO activityVO = JSONUtil.toBean(jsonStr, ActivityVO.class);
         if (StrUtil.isBlank(jsonStr)) {
             String value = redissonUtils.cacheResetForString(key, Duration.ofMinutes(2L)
                     , () -> self.loadJsonStr(activityId));//空括号是指这里的get方法,不需要形参
             if (value == null) {
-                error("服务器异常");
+                error(ErrorCode.INTERNAL_ERROR, "服务器异常");
             }
             activityVO = JSONUtil.toBean(value, ActivityVO.class);
         }
@@ -144,7 +145,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
                 .map(elem -> BeanUtil.copyProperties(elem, ActivityPageVO.class)).toList();
 
 
-        return Result.ok(new PageResultVO<ActivityPageVO>(result.getTotal()
+        return Result.ok(new PageResultVO<>(result.getTotal()
                 , result.getCurrent(), result.getSize(), result.getPages(),pageVOList));
 
 
@@ -156,18 +157,18 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         Activity activity = mutationGuard.lock(activityId);
         checkOwner(activity);
         if (!activity.getStatus().equals(0)) {
-            error("活动处于非草稿状态");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动处于非草稿状态");
         }
         LocalDateTime now = LocalDateTime.now();
         if (!now.isBefore(activity.getRegistrationEndTime())) {
-            error("报名截止时间不能在发布时间之前");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "报名截止时间不能在发布时间之前");
         }
         boolean success = lambdaUpdate().eq(Activity::getActivityId, activityId)
                 .gt(Activity::getRegistrationEndTime, LocalDateTime.now())
                 .eq(Activity::getStatus, 0).set(Activity::getStatus, 1L)
                 .set(Activity::getRegistrationCacheStatus, 0).update();
         if (!success) {
-            error("更新失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "更新失败");
         }
         removeActivityCacheAfterCommitWhenPublish(activityId);
         return Result.ok();
@@ -187,7 +188,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         Long userId = user.getUserId();
         Page<Activity> result= lambdaQuery().eq(Activity::getCreatorId, userId).orderByDesc(Activity::getActivityId).page(page);
@@ -211,7 +212,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     @Override
     public Result<PageResultVO<ActivityPageVO>> getActivityPageList(String keyword, Integer pages) {
         if(StrUtil.isBlank(keyword)){
-            error("关键词不能为空");
+            error(ErrorCode.PARAMETER_INVALID, "关键词不能为空");
         }
         Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
         Page<Activity> result = lambdaQuery().eq(Activity::getStatus, 1).like(Activity::getActivityName, keyword).orderByDesc(Activity::getActivityId).page(page);
@@ -222,7 +223,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     @Override
     public Result<PageResultVO<ActivityPageVO>> getActivityPageList(Integer activityType, String keyword, Integer pages) {
         if(StrUtil.isBlank(keyword)){
-            error("关键词不能为空");
+            error(ErrorCode.PARAMETER_INVALID, "关键词不能为空");
         }
         Page<Activity> page = new Page<>(pages, PAGE_SIZE_ACTIVITY);
         Page<Activity> result = lambdaQuery().eq(Activity::getActivityType, activityType).eq(Activity::getStatus, 1).like(Activity::getActivityName, keyword).
@@ -256,7 +257,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
                 .set(Activity::getStatus, 2).set(Activity::getRemainingCapacity, activity.getTotalCapacity())
                 .update();
         if (!success) {
-            error("活动取消失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "活动取消失败");
         }
         // 没有报名或候补时更新零行是正常情况；SQL 异常仍会使整个事务回滚。
         waitListService.lambdaUpdate()
@@ -270,7 +271,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     public static void checkIfAdmin() {
         User user =BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null || !Integer.valueOf(1).equals(user.getRole())) {
-            error("用户不具备管理员权限");
+            error(ErrorCode.FORBIDDEN, "用户不具备管理员权限");
         }
     }
 
@@ -280,13 +281,13 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         Activity activity = mutationGuard.lock(activityId);
         checkOwner(activity);
         if (!activity.getStatus().equals(0)) {
-            error("活动处于非草稿状态");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动处于非草稿状态");
         }
         Integer newTotalCapacity= activityDTO.getTotalCapacity();
         Integer remainingCapacity=activity.getRemainingCapacity();
         Integer oldTotalCapacity=activity.getTotalCapacity();
         if (newTotalCapacity < oldTotalCapacity - remainingCapacity) {
-            error("修改后活动容量不足");
+            error(ErrorCode.CAPACITY_CONFLICT, "修改后活动容量不足");
         }
         Activity newActivity = BeanUtil.copyProperties(activityDTO, Activity.class);
         newActivity.setActivityId(activityId);
@@ -295,7 +296,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         boolean success =lambdaUpdate().eq(Activity::getActivityId,activityId)
                 .eq(Activity::getStatus,0).update(newActivity);
         if(!success){
-            error("更新活动失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "更新活动失败");
         }
 
         return Result.ok();
@@ -304,11 +305,11 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     private Activity checkUserID(Long activityId) {
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if(user==null){
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         Activity activity = lambdaQuery().eq(Activity::getActivityId, activityId).one();
         if(activity==null){
-            error("活动不存在");
+            error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
         }
         checkOwner(activity);
         return activity;
@@ -317,10 +318,10 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     private void checkOwner(Activity activity) {
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null) {
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         if (!activity.getCreatorId().equals(user.getUserId())) {
-            error("登录用户与创建活动用户不匹配");
+            error(ErrorCode.NOT_RESOURCE_OWNER, "登录用户与创建活动用户不匹配");
         }
     }
 
@@ -357,10 +358,10 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
             return;
         }
         if (!Integer.valueOf(1).equals(activity.getStatus())) {
-            error("活动状态异常");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动状态异常");
         }
         if (Duration.between(LocalDateTime.now(), activity.getRegistrationEndTime()).getSeconds() < 10) {
-            error("活动时间不足");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动时间不足");
         }
         registerActivityCache(activityId, activity);
         lambdaUpdate().eq(Activity::getActivityId, activityId).set(Activity::getRegistrationCacheStatus, 1).update();

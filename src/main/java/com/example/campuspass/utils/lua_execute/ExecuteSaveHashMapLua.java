@@ -1,5 +1,6 @@
 package com.example.campuspass.utils.lua_execute;
 
+import com.example.campuspass.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -50,7 +51,7 @@ public class ExecuteSaveHashMapLua {
                 list.toArray()
         );
         if(result==-1){
-            error("传入参数有误");
+            error(ErrorCode.PARAMETER_INVALID, "传入参数有误");
         }
     }
 
@@ -69,7 +70,7 @@ public class ExecuteSaveHashMapLua {
                 list.toArray()
         );
         if(result==-1){
-            error("传入参数有误");
+            error(ErrorCode.PARAMETER_INVALID, "传入参数有误");
         }
         if(result==-2){
             log.warn("缓存已存在");

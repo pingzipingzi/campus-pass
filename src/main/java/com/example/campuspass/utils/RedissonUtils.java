@@ -1,5 +1,6 @@
 package com.example.campuspass.utils;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.util.StrUtil;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -8,7 +9,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -37,14 +37,14 @@ public class RedissonUtils {
         try {
             acquired = lock.tryLock(1,  TimeUnit.SECONDS);
             if (!acquired) {
-                error("活动信息加载中，请稍后重试");
+                error(ErrorCode.SERVICE_BUSY, "活动信息加载中，请稍后重试");
             }
 
             //再次读取缓存，如果别的线程已经重建缓存就返回
             String str = stringRedisTemplate.opsForValue().get(key);
             if (!StrUtil.isBlank(str)) {
                 if (CACHE_NOT_FOUND_VALUE.equals(str)) {
-                    error("活动不存在");
+                    error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
                 }
                 return str;
             }
@@ -53,7 +53,7 @@ public class RedissonUtils {
 
             if (CACHE_NOT_FOUND_VALUE.equals(value)) {
                 stringRedisTemplate.opsForValue().set(key, value, Duration.ofSeconds(30L));
-                error("活动不存在");
+                error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
             }
 
             stringRedisTemplate.opsForValue().set(key, value, ttl);
@@ -61,7 +61,7 @@ public class RedissonUtils {
             return value;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            error("请求中断，请稍后重试");
+            error(ErrorCode.REQUEST_INTERRUPTED, "请求中断，请稍后重试");
         } finally {
             if (acquired && lock.isHeldByCurrentThread()) {
                 lock.unlock();
@@ -79,13 +79,13 @@ public class RedissonUtils {
         try {
             acquired = lock.tryLock(1, TimeUnit.SECONDS);
             if (!acquired) {
-                error("请求失败，请稍后重试");
+                error(ErrorCode.SERVICE_BUSY, "请求失败，请稍后重试");
             }
 
             stringRedisTemplate.delete(key);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            error("请求中断，请稍后再试");
+            error(ErrorCode.REQUEST_INTERRUPTED, "请求中断，请稍后再试");
         } finally {
             if (acquired && lock.isHeldByCurrentThread()) {
                 lock.unlock();

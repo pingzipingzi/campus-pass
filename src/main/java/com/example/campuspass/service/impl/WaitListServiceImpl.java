@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -13,7 +14,6 @@ import com.example.campuspass.entity.WaitList;
 import com.example.campuspass.mapper.WaitListMapper;
 import com.example.campuspass.service.IWaitListService;
 import com.example.campuspass.vo.PageResultVO;
-import com.example.campuspass.vo.RegistrationVO;
 import com.example.campuspass.vo.WaitListVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,7 +53,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     @Override
     public Result<PageResultVO<WaitListVO>> pageMyWaitLists(Integer pages) {
         if (pages == null || pages < 1) {
-            error("页码必须大于零");
+            error(ErrorCode.PARAMETER_INVALID, "页码必须大于零");
         }
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
@@ -77,7 +77,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
         WaitList one = lambdaQuery().eq(WaitList::getUserId, userId).eq(WaitList::getActivityId, activityId).one();
         if (one == null || one.getStatus() != 0) {
             if (tag == 0) {
-                error("用户目前未处于候补状态");
+                error(ErrorCode.NOT_WAITLISTED, "用户目前未处于候补状态");
             }
             return Result.ok();//应对清理候补记录之前，用户在其他用户取消报名时被禁用并清理缓存
         }
@@ -88,7 +88,7 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
                 .set(WaitList::getPromotedTime, null).update();
 
         if (!success) {
-            error("数据更新失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "数据更新失败");
         }
         requestService.removeRequestCacheAfterCommit(activityId, userId, 0);
         return Result.ok();
@@ -110,14 +110,14 @@ public class WaitListServiceImpl extends ServiceImpl<WaitListMapper, WaitList> i
     public Result<PageResultVO<WaitListVO>> pageWaitListOfMyActivity(Integer pages, Long activityId) {
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if(userDTO == null) {
-            error("用户未登录");}
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");}
         Long userId = userDTO.getUserId();
         Activity activity = activityService.lambdaQuery().eq(Activity::getActivityId, activityId).one();
         if (activity == null || !Integer.valueOf(1).equals(activity.getStatus())) {
-            error("活动状态异常");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动状态异常");
         }
         if (!Objects.equals(activity.getCreatorId(), userId) && userDTO.getRole() != 1) {
-            error("用户权限不足");
+            error(ErrorCode.FORBIDDEN, "用户权限不足");
         }
 
         Page<WaitList> page = new Page<>(pages, WAIT_LIST_PAGE_SIZE);

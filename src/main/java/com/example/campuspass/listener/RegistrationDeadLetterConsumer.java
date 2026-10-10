@@ -1,5 +1,6 @@
 package com.example.campuspass.listener;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.json.JSONUtil;
 import com.example.campuspass.dto.MessageDTO;
 import com.example.campuspass.entity.Activity;
@@ -83,7 +84,7 @@ public class RegistrationDeadLetterConsumer {
         Integer cacheStatus = messageDTO.getCacheStatus();
 
         if(userId==null||activityId==null||requestId==null||cacheStatus==null||(cacheStatus!=0&&cacheStatus!=1)) {
-            error("消息接收异常");
+            error(ErrorCode.MESSAGE_PROCESSING_FAILED, "消息接收异常");
         }
 
         Activity activity = activityLock.lock(activityId);
@@ -147,7 +148,7 @@ public class RegistrationDeadLetterConsumer {
                 isStockChanged.toString(), requestId, Long.toString(endTime.atZone(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()));
 
         if (result == -1) {
-            error("脚本输入参数有误");
+            error(ErrorCode.INTERNAL_ERROR, "脚本输入参数有误");
         }
 
         if(result == -2) {

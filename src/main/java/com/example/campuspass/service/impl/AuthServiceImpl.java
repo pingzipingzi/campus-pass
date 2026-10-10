@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.example.campuspass.dto.*;
@@ -67,7 +68,7 @@ public class AuthServiceImpl implements IAuthService {
     @Override
     public Result<Void> sendCode(String phone) {
         if (RegexUtils.isPhoneInvalid(phone)) {
-            error( "手机号有误");
+            error(ErrorCode.PARAMETER_INVALID, "手机号有误");
         }
         String key=LOGIN_CODE_KEY_PREFIX + phone;
         timesCheck(SEND_CODE_RATE_LIMIT_KEY_PREFIX + phone);
@@ -85,18 +86,18 @@ public class AuthServiceImpl implements IAuthService {
         String password = passwordLoginDTO.getPassword();
         String phone = passwordLoginDTO.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
-            error( "手机号或密码有误");
+            error(ErrorCode.INVALID_CREDENTIALS, "手机号或密码有误");
         }
 
         timesCheck(PASSWORD_LOGIN_RATE_LIMIT_KEY_PREFIX + phone);
         User user = userService.lambdaQuery().eq(User::getPhone, phone).one();
         if(user==null){
-            error( "手机号或密码有误");
+            error(ErrorCode.INVALID_CREDENTIALS, "手机号或密码有误");
         }
 
         String encodedPassword = user.getPassword();
         if (!passwordEncoder.matches(password,encodedPassword)) {
-            error( "手机号或密码有误");
+            error(ErrorCode.INVALID_CREDENTIALS, "手机号或密码有误");
         }
         String token = getToken(user);
 
@@ -108,14 +109,14 @@ public class AuthServiceImpl implements IAuthService {
 
         String header = request.getHeader("Authorization");
         if (StrUtil.isBlank(header) || !header.startsWith("Bearer ")) {
-            error( "请求头内容非法");
+            error(ErrorCode.INVALID_TOKEN, "请求头内容非法");
         }
         String jwtToken = header.substring(7);
         Claims claims = jwtUtils.parseToken(jwtToken);
         String token = LOGIN_STATUS_KEY_PREFIX + claims.get("sid", String.class);
         Boolean success = stringRedisTemplate.delete(token);
         if(!success){
-            error( "缓存删除失败");
+            error(ErrorCode.CACHE_OPERATION_FAILED, "缓存删除失败");
         }
         return Result.ok();
     }
@@ -145,7 +146,7 @@ public class AuthServiceImpl implements IAuthService {
         try {
             userService.save(user);
         } catch (DuplicateKeyException e) {
-            error( "用户名,手机号或者学号已经被注册过了");
+            error(ErrorCode.RESOURCE_CONFLICT, "用户名,手机号或者学号已经被注册过了");
         }
         return Result.ok();
 
@@ -156,11 +157,11 @@ public class AuthServiceImpl implements IAuthService {
         Long userId = getUserId();
         User user = userService.lambdaQuery().eq(User::getUserId, userId).one();
         if (user == null) {
-            error("用户不存在");
+            error(ErrorCode.USER_NOT_FOUND, "用户不存在");
         }
         String oldPassword = changePasswordDTO.getOldPassword();
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
-            error("原密码输入有误");
+            error(ErrorCode.INVALID_CREDENTIALS, "原密码输入有误");
         }
         String newPassword = changePasswordDTO.getNewPassword();
         setNewPassword(newPassword, user);
@@ -172,7 +173,7 @@ public class AuthServiceImpl implements IAuthService {
         timesCheck(RESET_PASSWORD_RATE_LIMIT_KEY_PREFIX + forgetPasswordDTO.getPhone());
         User user = userService.lambdaQuery().eq(User::getPhone, forgetPasswordDTO.getPhone()).one();
         if (user == null) {
-            error("手机号或验证码有误");
+            error(ErrorCode.VERIFICATION_CODE_INVALID, "手机号或验证码有误");
         }
         String key = LOGIN_CODE_KEY_PREFIX + forgetPasswordDTO.getPhone();
         consumeCode(key, forgetPasswordDTO.getCode());
@@ -188,7 +189,7 @@ public class AuthServiceImpl implements IAuthService {
                 .eq(User::getPassword, user.getPassword()).eq(User::getAuthVersion, user.getAuthVersion())
                 .set(User::getPassword, newPassword).set(User::getAuthVersion, user.getAuthVersion() + 1).update();
         if (!update) {
-            error("数据更新失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "数据更新失败");
         }
         String keyForUser = USER_CACHE_KEY_PREFIX + user.getUserId();
         stringRedisTemplate.delete(keyForUser);
@@ -198,7 +199,7 @@ public class AuthServiceImpl implements IAuthService {
     public static @NonNull Long getUserId() {
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if (userDTO == null) {
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         return userDTO.getUserId();
     }
@@ -209,13 +210,13 @@ public class AuthServiceImpl implements IAuthService {
         String code=codeLoginDTO.getCode();
         String phone=codeLoginDTO.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
-            error( "手机号或验证码有误");
+            error(ErrorCode.VERIFICATION_CODE_INVALID, "手机号或验证码有误");
         }
         String key = LOGIN_CODE_KEY_PREFIX + phone;
         timesCheck(CODE_VERIFY_RATE_LIMIT_KEY_PREFIX + phone);
         User user = userService.lambdaQuery().eq(User::getPhone, phone).one();
         if(user==null){
-            error( "手机号或验证码有误");
+            error(ErrorCode.VERIFICATION_CODE_INVALID, "手机号或验证码有误");
         }
 
         consumeCode(key, code);
@@ -227,26 +228,26 @@ public class AuthServiceImpl implements IAuthService {
     public void consumeCode(String key, String code) {
         Long result= stringRedisTemplate.execute(CONSUME_CODE,List.of(key), code);
         if (result == null || result == 0L) {
-            error( "手机号或验证码有误");
+            error(ErrorCode.VERIFICATION_CODE_INVALID, "手机号或验证码有误");
         }
     }
 
     public  void timesCheck(String timesKey) {
         Long execute = limitRateUtils.execute(timesKey, 5L, 300L);
         if(execute==-1){
-            error( "服务器异常");
+            error(ErrorCode.INTERNAL_ERROR, "服务器异常");
         }
         if(execute==0){
-            error( "重试次数过多");
+            error(ErrorCode.TOO_MANY_REQUESTS, "重试次数过多");
         }
     }
 
     public @NonNull String getToken(User user) {
 
         if(user.getStatus()==1){
-            error( "账号已被禁用");
+            error(ErrorCode.ACCOUNT_DISABLED, "账号已被禁用");
         }
-        String sessionId=user.getAuthVersion()+"&"+UUID.randomUUID().toString();
+        String sessionId=user.getAuthVersion()+"&"+UUID.randomUUID();
         String redisKey=LOGIN_STATUS_KEY_PREFIX + sessionId;
         stringRedisTemplate.opsForValue().set(redisKey, user.getUserId().toString()
                 , Duration.ofMinutes(LOGIN_TTL));

@@ -15,8 +15,13 @@ public class BusinessException extends RuntimeException{
         this.httpStatus = httpStatus;
     }
 
-    public static void error(String message) {
-        throw new BusinessException(40000, message, HttpStatus.BAD_REQUEST);
+    public static void error(ErrorCode errorCode) {
+        throw new BusinessException(
+                errorCode.getCode(), errorCode.getMessage(), errorCode.getHttpStatus());
+    }
+
+    public static void error(ErrorCode errorCode, String message) {
+        throw new BusinessException(errorCode.getCode(), message, errorCode.getHttpStatus());
     }
 
 }

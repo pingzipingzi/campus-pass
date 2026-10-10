@@ -1,5 +1,6 @@
 package com.example.campuspass.utils;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.util.StrUtil;
 
 import static com.example.campuspass.exception.BusinessException.error;
@@ -13,13 +14,13 @@ public class RegexUtils {
 
     public static void validateNickName(String userName ){
         if (!userName.matches(NICK_NAME_REGEX)) {
-            error("用户名不能包含空白字符、换行符或控制字符");
+            error(ErrorCode.PARAMETER_INVALID, "用户名不能包含空白字符、换行符或控制字符");
         }
         int sum = userName.codePoints()
                 .map(cp -> Character.UnicodeScript.of(cp)
                         == Character.UnicodeScript.HAN ? 2 : 1).sum();
         if (sum < 4 || sum > 20) {
-            error( "名字过长或过短，中文2~10，英文4~20");
+            error(ErrorCode.PARAMETER_INVALID, "名字过长或过短，中文2~10，英文4~20");
         }
     }
 

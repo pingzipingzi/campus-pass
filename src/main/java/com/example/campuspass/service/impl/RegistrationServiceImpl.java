@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -81,7 +82,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         Long userId = currentUserId();
         Activity activity = activityService.getById(activityId);
         if (activity == null) {
-            error("活动不存在");
+            error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
         }
         Registration registration = lambdaQuery()
                 .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
@@ -127,7 +128,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
 
         User user = userService.getById(userId);
         if (user == null || !Integer.valueOf(0).equals(user.getStatus())) {
-            error("账号不可用");
+            error(ErrorCode.ACCOUNT_DISABLED, "账号不可用");
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -150,13 +151,13 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
                 Long.toString(userId));
 
         if (result == -1) {
-            error("服务器异常");
+            error(ErrorCode.INTERNAL_ERROR, "服务器异常");
         }
         if (result == -2) {
-            error("现在不在报名时间内");
+            error(ErrorCode.REGISTRATION_CLOSED, "现在不在报名时间内");
         }
         if (result == 2) {
-            error("您已经报名过了");
+            error(ErrorCode.ALREADY_REGISTERED, "您已经报名过了");
         }
 
         MessageDTO messageDTO = new MessageDTO();
@@ -185,12 +186,12 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
 
         boolean updateRequest = requestService.lambdaUpdate().eq(Request::getRequestId, requestId).set(Request::getStatus, 1).update();
         if (!updateRequest) {
-            error("服务器异常，请重试");
+            error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
         }
 
         Registration registration = lambdaQuery().eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
         if (registration != null && registration.getStatus() == 0) {
-            error("您已经报名过了");
+            error(ErrorCode.ALREADY_REGISTERED, "您已经报名过了");
         }
 
         if (cacheStatus == 1 || !(activity.getRemainingCapacity() > 0)) {
@@ -202,16 +203,16 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
                 candidate.setStatus(0);
                 boolean save = waitListService.save(candidate);
                 if (!save) {
-                    error("服务器异常，请重试");
+                    error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
                 }
             } else {
                 if (candidate.getStatus() == 0) {
-                    error("您已经报名过了");
+                    error(ErrorCode.ALREADY_REGISTERED, "您已经报名过了");
                 }
                 boolean update = waitListService.lambdaUpdate().eq(WaitList::getWaitId, candidate.getWaitId()).set(WaitList::getStatus, 0)
                         .set(WaitList::getJoinTime, LocalDateTime.now()).set(WaitList::getPromotedTime, null).update();
                 if (!update) {
-                    error("服务器异常，请重试");
+                    error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
                 }
             }
             return;
@@ -220,7 +221,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         boolean update = activityService.lambdaUpdate().eq(Activity::getActivityId, activityId).gt(Activity::getRemainingCapacity, 0)
                 .setSql("remaining_capacity =remaining_capacity - 1").update();
         if (!update) {
-            error("服务器异常，请重试");
+            error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
         }
 
         if (registration == null) {
@@ -230,12 +231,12 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             registration.setStatus(0);
             boolean save = save(registration);
             if (!save) {
-                error("服务器异常，请重试");
+                error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
             }
         } else {
             boolean updateRegistration = lambdaUpdate().eq(Registration::getRegistrationId, registration.getRegistrationId()).set(Registration::getStatus, 0).update();
             if (!updateRegistration) {
-                error("服务器异常，请重试");
+                error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
             }
         }
     }
@@ -253,14 +254,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         Registration registration = lambdaQuery()
                 .eq(Registration::getActivityId, activityId).eq(Registration::getUserId, userId).one();
         if (registration == null || registration.getStatus() != 0) {
-            error("用户当前没有成功报名，不能释放名额");
+            error(ErrorCode.NOT_REGISTERED, "用户当前没有成功报名，不能释放名额");
         }
 
         requireSuccess(lambdaUpdate()
                 .eq(Registration::getRegistrationId, registration.getRegistrationId())
                 .eq(Registration::getStatus, 0).set(Registration::getStatus, 1).update());
         if (activity.getRemainingCapacity() >= activity.getTotalCapacity()) {
-            error("活动名额数据异常");
+            error(ErrorCode.DATA_INCONSISTENT, "活动名额数据异常");
         }
         requireSuccess(activityService.lambdaUpdate()
                 .eq(Activity::getActivityId, activityId)
@@ -284,7 +285,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     @Override
     public Result<PageResultVO<RegistrationVO>> pageMyRegistration(Integer pages) {
         if (pages == null || pages < 1) {
-            error("页码必须大于零");
+            error(ErrorCode.PARAMETER_INVALID, "页码必须大于零");
         }
         Page<Registration> result = lambdaQuery().eq(Registration::getUserId, currentUserId())
                 .orderByDesc(Registration::getRegistrationId).page(new Page<>(pages, PAGE_SIZE));
@@ -305,14 +306,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     public Result<PageResultVO<RegistrationVO>> pageRegistrationsOfMyActivity(Integer pages, Long activityId) {
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if(userDTO == null) {
-            error("用户未登录");}
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");}
         Long userId = userDTO.getUserId();
         Activity activity = activityService.lambdaQuery().eq(Activity::getActivityId, activityId).one();
         if (activity == null || !Integer.valueOf(1).equals(activity.getStatus())) {
-            error("活动状态异常");
+            error(ErrorCode.ACTIVITY_STATE_CONFLICT, "活动状态异常");
         }
         if (!Objects.equals(activity.getCreatorId(), userId) && userDTO.getRole() != 1) {
-            error("用户权限不足");
+            error(ErrorCode.FORBIDDEN, "用户权限不足");
         }
 
         Page<Registration> page = new Page<>(pages, PAGE_SIZE);
@@ -347,7 +348,7 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             candidate = userLock.lock(head.getUserId());
             if (candidate == null || !Integer.valueOf(0).equals(candidate.getStatus())) {
                 log.error("候补用户id{}状态已变化", head.getUserId());
-                error("服务器异常");
+                error(ErrorCode.INTERNAL_ERROR, "服务器异常");
             }
 
             activateRegistration(activity.getActivityId(), head.getUserId());
@@ -394,14 +395,14 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
     private static Long currentUserId() {
         UserDTO user = USER_THREAD_LOCAL.get();
         if (user == null || user.getUserId() == null) {
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         return user.getUserId();
     }
 
     private static void requireSuccess(boolean success) {
         if (!success) {
-            error("数据状态已变化，请重试");
+            error(ErrorCode.DATA_STATE_CONFLICT, "数据状态已变化，请重试");
         }
     }
 

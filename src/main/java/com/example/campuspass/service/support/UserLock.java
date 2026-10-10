@@ -1,5 +1,6 @@
 package com.example.campuspass.service.support;
 
+import com.example.campuspass.exception.ErrorCode;
 import com.example.campuspass.entity.User;
 import com.example.campuspass.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,7 @@ public class UserLock {
     public User lock(Long userId) {
         User user = userMapper.getUserById(userId);
         if (user == null) {
-            error("用户不存在");
+            error(ErrorCode.USER_NOT_FOUND, "用户不存在");
         }
         return user;
     }

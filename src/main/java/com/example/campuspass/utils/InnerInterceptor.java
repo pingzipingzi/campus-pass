@@ -1,5 +1,6 @@
 package com.example.campuspass.utils;
 
+import com.example.campuspass.exception.ErrorCode;
 
 import com.example.campuspass.dto.UserDTO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,7 +15,7 @@ public class InnerInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if(userDTO==null){
-            error("请先登录");
+            error(ErrorCode.AUTH_REQUIRED, "请先登录");
         }
         return true;
     }

@@ -1,5 +1,6 @@
 package com.example.campuspass.listener;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.json.JSONUtil;
 import com.example.campuspass.dto.MessageDTO;
 import com.example.campuspass.entity.Activity;
@@ -37,8 +38,6 @@ public class RegistrationConsumer {
 
     private final RequestServiceImpl requestService;
 
-    private final UserServiceImpl userService;
-
     private final ActivityLock mutationGuard;
 
     private final StringRedisTemplate stringRedisTemplate;
@@ -71,7 +70,7 @@ public class RegistrationConsumer {
 
         MessageDTO messageDTO = JSONUtil.toBean(message, MessageDTO.class);
         if (messageDTO == null) {
-            error("消息接收异常");
+            error(ErrorCode.MESSAGE_PROCESSING_FAILED, "消息接收异常");
         }
 
         Long activityId = messageDTO.getActivityId();
@@ -82,7 +81,7 @@ public class RegistrationConsumer {
 
         if (userId == null || activityId == null || requestId == null || sendTimeStamp == null ||
                 cacheStatus == null || (cacheStatus != 0 && cacheStatus != 1)) {
-            error("消息接收异常");
+            error(ErrorCode.MESSAGE_PROCESSING_FAILED, "消息接收异常");
         }
 
         LocalDateTime sendTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(sendTimeStamp), ZoneId.of("Asia/Shanghai"));
@@ -90,7 +89,7 @@ public class RegistrationConsumer {
         Long result = stringRedisTemplate.execute(REGISTER_ACTIVITY_PENDING_SCRIPT,
                 List.of("registration:message:" + requestId), requestId);
         if(result == -1) {log.error("脚本参数异常");
-            error("服务器异常");}
+            error(ErrorCode.INTERNAL_ERROR, "服务器异常");}
 
         if (result == -2) {
             log.warn("请求id{}已发送成功", requestId);
@@ -102,19 +101,19 @@ public class RegistrationConsumer {
         Activity activity = mutationGuard.lock(activityId);
 
         if (activity == null || activity.getStatus() != 1) {
-            error("活动异常");
+            error(ErrorCode.DATA_INCONSISTENT, "活动异常");
         }
 
 
         User user = userLock.lock(userId);
 
         if (user == null||!Integer.valueOf(0).equals(user.getStatus())) {
-            error("用户异常");
+            error(ErrorCode.DATA_INCONSISTENT, "用户异常");
         }
 
         if (sendTime.isAfter(activity.getRegistrationEndTime())
                 || sendTime.isBefore(activity.getRegistrationStartTime())) {
-            error("不在报名时间内");
+            error(ErrorCode.REGISTRATION_CLOSED, "不在报名时间内");
         }
 
         Request request = requestService.lambdaQuery().eq(Request::getRequestId, requestId).one();
@@ -131,7 +130,7 @@ public class RegistrationConsumer {
         boolean saveRequest = requestService.save(request);
 
         if (!saveRequest) {
-            error("服务器异常，请重试");
+            error(ErrorCode.SERVICE_BUSY, "服务器异常，请重试");
         }
 
         registrationService.processMessage(activity, userId, requestId,cacheStatus);

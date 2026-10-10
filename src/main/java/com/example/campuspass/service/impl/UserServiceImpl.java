@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -75,14 +76,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         checkIfAdmin();
         User user = userLock.lock(userId);
         if (user == null) {
-            error("用户不存在");
+            error(ErrorCode.USER_NOT_FOUND, "用户不存在");
         }
         if (Integer.valueOf(1).equals(user.getRole())) {
-            error("不能管理管理员权限用户");
+            error(ErrorCode.ADMIN_OPERATION_FORBIDDEN, "不能管理管理员权限用户");
         }
         boolean success = lambdaUpdate().eq(User::getUserId, userId).set(User::getStatus, 1).update();
         if (!success) {
-            error("数据更新失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "数据更新失败");
         }
 
         List<Registration> list = registrationService.lambdaQuery().eq(Registration::getUserId, userId).eq(Registration::getStatus, 0).list();
@@ -105,7 +106,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                     try {
                         if (registration == null ) {
                             log.error("用户id{}禁用时处理报名消息异常", user.getUserId());
-                            error("报名记录为空");
+                            error(ErrorCode.DATA_INCONSISTENT, "报名记录为空");
                         }
                         registrationService.removeRegistration(registration.getActivityId(), user.getUserId());
                     } catch (Exception e) {
@@ -128,7 +129,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                     try {
                         if (waitList == null ) {
                             log.error("用户id{}禁用时处理候补记录异常", user.getUserId());
-                            error("候补记录为空");
+                            error(ErrorCode.DATA_INCONSISTENT, "候补记录为空");
                         }
                         waitListService.removeWaitList(waitList.getActivityId(), user.getUserId(), 1);
                     }catch (Exception e){
@@ -149,14 +150,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         checkIfAdmin();
         User user = userLock.lock(userId);
         if (user == null) {
-            error("用户不存在");
+            error(ErrorCode.USER_NOT_FOUND, "用户不存在");
         }
         if (Integer.valueOf(1).equals(user.getRole())) {
-            error("不能管理管理员权限用户");
+            error(ErrorCode.ADMIN_OPERATION_FORBIDDEN, "不能管理管理员权限用户");
         }
         boolean success = lambdaUpdate().eq(User::getUserId, userId).set(User::getStatus, 0).update();
         if (!success) {
-            error("数据更新失败");
+            error(ErrorCode.DATA_OPERATION_FAILED, "数据更新失败");
         }
         refreshCacheUserAfterCommit(user, 0);
         return Result.ok();
@@ -176,7 +177,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         User user = lambdaQuery().eq(User::getUserId, userId).one();
         if (user == null) {
-            error("用户不存在");
+            error(ErrorCode.USER_NOT_FOUND, "用户不存在");
         }
         UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
         return Result.ok(userVO);
@@ -191,10 +192,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         try {
             boolean update = lambdaUpdate().eq(User::getUserId, userId).set(User::getUserName, name).update();
             if(!update){
-                error("更新数据失败");
+                error(ErrorCode.DATA_OPERATION_FAILED, "更新数据失败");
             }
         } catch (DuplicateKeyException e) {
-            error("用户名重复,请换一个试试呢");
+            error(ErrorCode.RESOURCE_CONFLICT, "用户名重复,请换一个试试呢");
         }
         stringRedisTemplate.delete(USER_CACHE_KEY_PREFIX + userId);
         return Result.ok();
@@ -203,7 +204,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     public static @NonNull Long getUserId() {
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if (userDTO == null) {
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         return userDTO.getUserId();
     }
@@ -227,7 +228,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     public static void checkIfAdmin() {
         User user = BeanUtil.copyProperties(USER_THREAD_LOCAL.get(), User.class);
         if (user == null ||! Integer.valueOf(1).equals(user.getRole())) {
-            error("用户不具备管理员权限");
+            error(ErrorCode.FORBIDDEN, "用户不具备管理员权限");
         }
     }
 }

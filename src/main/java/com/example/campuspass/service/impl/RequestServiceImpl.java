@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -49,11 +50,11 @@ public class RequestServiceImpl extends ServiceImpl<RequestMapper, Request> impl
 
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if(userDTO == null){
-            error("用户未登录");}
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");}
         Long userId = userDTO.getUserId();
         Request request = lambdaQuery().eq(Request::getRequestId, requestId).eq(Request::getUserId, userId).one();
         if(request==null){
-            error("请求不存在或仍在处理中");
+            error(ErrorCode.REQUEST_NOT_FOUND, "请求不存在或仍在处理中");
         }
         RequestVO requestVO = new RequestVO();
         BeanUtils.copyProperties(request,requestVO);
@@ -63,13 +64,13 @@ public class RequestServiceImpl extends ServiceImpl<RequestMapper, Request> impl
     @Override
     public Result<PageResultVO<RequestVO>> pageMyRequest(Integer pages) {
         if(pages==null||pages==0){
-            error("页码必须大于0");
+            error(ErrorCode.PARAMETER_INVALID, "页码必须大于0");
         }
         UserDTO userDTO = USER_THREAD_LOCAL.get();
         if(userDTO==null||userDTO.getUserId()==null){
-            error("用户未登录");
+            error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
-        Page<Request> page = lambdaQuery().eq(Request::getUserId, userDTO.getUserId()).orderByDesc(Request::getCreateTime).page(new Page<Request>(pages, PAGE_SIZE));
+        Page<Request> page = lambdaQuery().eq(Request::getUserId, userDTO.getUserId()).orderByDesc(Request::getCreateTime).page(new Page<>(pages, PAGE_SIZE));
         List<RequestVO> list = page.getRecords().stream().map(record -> BeanUtil.copyProperties(record, RequestVO.class)).toList();
 
         return Result.ok(new PageResultVO<>(page.getTotal(), page.getCurrent(), page.getSize(), page.getPages(), list));

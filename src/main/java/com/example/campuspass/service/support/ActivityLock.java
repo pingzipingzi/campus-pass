@@ -1,5 +1,6 @@
 package com.example.campuspass.service.support;
 
+import com.example.campuspass.exception.ErrorCode;
 import com.example.campuspass.entity.Activity;
 import com.example.campuspass.mapper.ActivityMapper;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +19,7 @@ public class ActivityLock {
     public Activity lock(Long activityId) {
         Activity activity = activityMapper.selectForUpdate(activityId);
         if (activity == null) {
-            error("活动不存在");
+            error(ErrorCode.ACTIVITY_NOT_FOUND, "活动不存在");
         }
         return activity;
     }
