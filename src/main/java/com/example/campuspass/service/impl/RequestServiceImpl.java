@@ -1,5 +1,6 @@
 package com.example.campuspass.service.impl;
 
+import com.example.campuspass.entity.Activity;
 import com.example.campuspass.exception.ErrorCode;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -14,6 +15,7 @@ import com.example.campuspass.vo.RequestVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -22,6 +24,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RefreshInterceptor.USER_THREAD_LOCAL;
@@ -35,6 +40,10 @@ public class RequestServiceImpl extends ServiceImpl<RequestMapper, Request> impl
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Lazy
+    @Autowired
+    private ActivityServiceImpl activityService;
 
     private static final DefaultRedisScript<Long> REMOVE_REQUEST_CACHE_SCRIPT;
 
@@ -58,6 +67,11 @@ public class RequestServiceImpl extends ServiceImpl<RequestMapper, Request> impl
         }
         RequestVO requestVO = new RequestVO();
         BeanUtils.copyProperties(request,requestVO);
+        Activity activity = activityService.lambdaQuery().eq(Activity::getActivityId, requestVO.getActivityId()).one();
+        if (activity == null || activity.getActivityName() == null) {
+            error(ErrorCode.DATA_INCONSISTENT, "请求关联的活动数据异常");
+        }
+        requestVO.setActivityName(activity.getActivityName());
         return Result.ok(requestVO);
     }
 
@@ -71,7 +85,27 @@ public class RequestServiceImpl extends ServiceImpl<RequestMapper, Request> impl
             error(ErrorCode.AUTH_REQUIRED, "用户未登录");
         }
         Page<Request> page = lambdaQuery().eq(Request::getUserId, userDTO.getUserId()).orderByDesc(Request::getCreateTime).page(new Page<>(pages, PAGE_SIZE));
-        List<RequestVO> list = page.getRecords().stream().map(record -> BeanUtil.copyProperties(record, RequestVO.class)).toList();
+        List<Long> activityIds = page.getRecords().stream()
+                .map(Request::getActivityId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, String> activityNames = activityIds.isEmpty()
+                ? Map.of()
+                : activityService.listByIds(activityIds).stream()
+                .collect(Collectors.toMap(
+                        Activity::getActivityId,
+                        Activity::getActivityName,
+                        (first, ignored) -> first));//同名key出现保留旧值
+        List<RequestVO> list = page.getRecords().stream().map(record -> {
+            RequestVO requestVO = BeanUtil.copyProperties(record, RequestVO.class);
+            String activityName = activityNames.get(record.getActivityId());
+            if (activityName == null) {
+                error(ErrorCode.DATA_INCONSISTENT, "请求关联的活动数据异常");
+            }
+            requestVO.setActivityName(activityName);
+            return requestVO;
+        }).toList();
 
         return Result.ok(new PageResultVO<>(page.getTotal(), page.getCurrent(), page.getSize(), page.getPages(), list));
     }

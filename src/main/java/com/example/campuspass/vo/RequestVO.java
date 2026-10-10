@@ -9,6 +9,8 @@ public class RequestVO {
 
     private Long activityId;
 
+    private String activityName;
+
     private Long userId;
 
     private Integer status;

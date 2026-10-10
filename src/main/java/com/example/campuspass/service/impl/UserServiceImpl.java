@@ -30,6 +30,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.USER_CACHE_KEY_PREFIX;
@@ -52,6 +53,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Autowired
     private RegistrationServiceImpl registrationService;
 
+    @Lazy
     @Autowired
     private WaitListServiceImpl waitListService;
 
@@ -217,7 +219,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                     String key = USER_CACHE_KEY_PREFIX + user.getUserId();
                     Map<String, Object> map = BeanUtil.beanToMap(BeanUtil.copyProperties(user, UserDTO.class));
 
-                    executeSaveHashMapLua.executeScript(map, key, USER_CACHE_TTL_SECONDS);
+                    executeSaveHashMapLua.executeScript(map, key,
+                            USER_CACHE_TTL_SECONDS + ThreadLocalRandom.current().nextLong(0L, 30L));
                 } catch (Exception e) {
                     log.error("用户id{}缓存更新失败", user.getUserId(), e);
                 }

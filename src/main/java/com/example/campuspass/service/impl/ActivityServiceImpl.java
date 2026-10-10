@@ -40,6 +40,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static com.example.campuspass.exception.BusinessException.error;
@@ -103,7 +104,7 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
         }
         ActivityVO activityVO = JSONUtil.toBean(jsonStr, ActivityVO.class);
         if (StrUtil.isBlank(jsonStr)) {
-            String value = redissonUtils.cacheResetForString(key, Duration.ofMinutes(2L)
+            String value = redissonUtils.cacheResetForString(key, Duration.ofSeconds(120L + ThreadLocalRandom.current().nextLong(0L,30L))
                     , () -> self.loadJsonStr(activityId));//空括号是指这里的get方法,不需要形参
             if (value == null) {
                 error(ErrorCode.INTERNAL_ERROR, "服务器异常");
