@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local test credentials and generated load-test reports ###
+/tests/jmeter/tokens.csv
+/tests/jmeter/accounts.csv
+/tests/jmeter/*.jtl
+/tests/results/*
+!/tests/results/.gitkeep
+
+/jmeter.log

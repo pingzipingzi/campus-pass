@@ -11,10 +11,10 @@ spring:
   data:
       redis:
         host: ${REDIS_HOST}
-        port: 6379
+        port: ${REDIS_PORT:6379}
   rabbitmq:
     host: ${RABBITMQ_HOST}
-    port: 5672
+    port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME}
     password: ${RABBITMQ_PASSWORD}
     virtual-host: ${RABBITMQ_VIRTUAL_HOST}

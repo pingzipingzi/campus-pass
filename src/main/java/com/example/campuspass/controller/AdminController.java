@@ -1,11 +1,9 @@
 package com.example.campuspass.controller;
 
-import com.example.campuspass.dto.ActivityDTO;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.service.IActivityService;
 import com.example.campuspass.service.IUserService;
 import com.example.campuspass.vo.ActivityPageVO;
-import com.example.campuspass.vo.ActivityVO;
 import com.example.campuspass.vo.PageResultVO;
 import com.example.campuspass.vo.UserVO;
 import io.swagger.v3.oas.annotations.tags.Tag;

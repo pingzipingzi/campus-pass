@@ -3,7 +3,6 @@ package com.example.campuspass.controller;
 import com.example.campuspass.dto.Result;
 import com.example.campuspass.service.IWaitListService;
 import com.example.campuspass.vo.PageResultVO;
-import com.example.campuspass.vo.RegistrationVO;
 import com.example.campuspass.vo.WaitListVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Min;

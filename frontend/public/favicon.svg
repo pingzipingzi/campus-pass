@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="campus-pass" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5579e8"/>
+      <stop offset="1" stop-color="#315bd9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#campus-pass)"/>
+  <path d="M20 20h13c8 0 13 4 13 11s-5 11-13 11h-5v7h-8V20Zm8 7v8h5c3 0 5-1 5-4s-2-4-5-4h-5Z" fill="#fff"/>
+  <path d="M18 18h16v7H25v18h9v7H18V18Z" fill="#fff" opacity=".96"/>
+</svg>

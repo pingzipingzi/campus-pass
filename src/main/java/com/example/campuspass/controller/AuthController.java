@@ -2,7 +2,6 @@ package com.example.campuspass.controller;
 
 import com.example.campuspass.dto.*;
 import com.example.campuspass.service.IAuthService;
-import com.example.campuspass.service.impl.AuthServiceImpl;
 import com.example.campuspass.vo.LoginVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;

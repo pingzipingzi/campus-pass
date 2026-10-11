@@ -2,8 +2,6 @@ package com.example.campuspass.dto;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
 @Data
 public class MessageDTO {
 

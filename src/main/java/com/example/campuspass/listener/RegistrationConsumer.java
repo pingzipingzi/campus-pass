@@ -8,7 +8,6 @@ import com.example.campuspass.entity.Request;
 import com.example.campuspass.entity.User;
 import com.example.campuspass.service.impl.RegistrationServiceImpl;
 import com.example.campuspass.service.impl.RequestServiceImpl;
-import com.example.campuspass.service.impl.UserServiceImpl;
 import com.example.campuspass.service.support.ActivityLock;
 import com.example.campuspass.service.support.UserLock;
 import lombok.RequiredArgsConstructor;
