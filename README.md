@@ -4,6 +4,20 @@ CampusPass 是一个面向校园活动场景的前后端分离报名系统，覆
 
 项目重点解决热门活动报名中的库存一致性、重复报名、异步处理失败和候补公平性问题。报名请求先通过 Redis Lua 脚本完成原子校验与库存预扣，再交由 RabbitMQ 异步写入 MySQL；消费失败时通过重试、死信处理和定时补偿恢复数据。
 
+## 界面展示
+
+### 发现活动
+
+![发现活动页面](docs/images/activity-discovery.png)
+
+### 报名与候补记录
+
+![报名与候补记录页面](docs/images/activity-records.png)
+
+### 活动发布与管理
+
+![活动发布与管理页面](docs/images/activity-management.png)
+
 ## 主要功能
 
 ### 用户功能
