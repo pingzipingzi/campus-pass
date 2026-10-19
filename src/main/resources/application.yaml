@@ -3,6 +3,11 @@ server:
 spring:
   application:
     name: campus-pass
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: campus-pass-scheduler-
   datasource:
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: ${MYSQL_URL}

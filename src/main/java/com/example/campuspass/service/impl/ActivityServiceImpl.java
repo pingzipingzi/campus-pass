@@ -38,10 +38,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static com.example.campuspass.exception.BusinessException.error;
 import static com.example.campuspass.utils.RedisConstants.ACTIVITY_DETAIL_KEY_PREFIX;
@@ -75,6 +75,9 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
 
     @Autowired
     private ExecuteSaveHashMapLua executeSaveHashMapLua;
+
+    @Autowired
+    private ExecutorService executor;
 
     @Override
     public Result<Void> createActivity(ActivityDTO activityDTO) {
@@ -385,14 +388,24 @@ public class ActivityServiceImpl extends ServiceImpl<ActivityMapper, Activity> i
     @Scheduled(fixedDelay = 30L,timeUnit = TimeUnit.SECONDS)
     public void scheduleActivityCacheInitialization() {
         List<Activity> activities = lambdaQuery().eq(Activity::getStatus, 1).eq(Activity::getRegistrationCacheStatus, 0).list();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
         for (Activity activity : activities) {
             Long activityId = activity.getActivityId();
             try {
-                self.activityCacheInitialization(activityId);
-            } catch (Exception e) {
-                log.error("活动id {}缓存初始化失败", activityId, e);
+                CompletableFuture<Void> future=CompletableFuture.runAsync(() -> {
+                    try {
+                        self.activityCacheInitialization(activityId);
+                    } catch (Exception e) {
+                        log.error("活动id {}缓存初始化失败", activityId, e);
+                    }
+                },executor);
+                futures.add(future);
+            } catch (RejectedExecutionException e) {
+                log.error("活动id {}缓存初始化失败，请求数超出线程池处理范围", activityId, e);
             }
         }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
     }
 
     public void removeActivityCacheAfterCommitWhenCancel(Long activityId) {
