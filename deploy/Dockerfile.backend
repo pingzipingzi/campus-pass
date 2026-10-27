@@ -1,0 +1,9 @@
+from eclipse-temurin:17-jre
+
+workdir /app
+
+copy target/campus-pass-0.0.1-SNAPSHOT.jar app.jar
+
+expose 8080
+
+entrypoint ["java", "-jar","app.jar"]

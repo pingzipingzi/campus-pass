@@ -1,0 +1,10 @@
+**
+!target/
+!target/campus-pass-0.0.1-SNAPSHOT.jar
+!frontend/
+!frontend/dist/
+!frontend/dist/**
+!deploy/
+!deploy/Dockerfile.backend
+!deploy/Dockerfile.frontend
+!deploy/nginx.conf

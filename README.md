@@ -89,6 +89,8 @@ flowchart LR
 
 ## 项目结构
 
+完整容器部署（含 MySQL、Redis、RabbitMQ 和演示数据）：[部署说明](deploy/README.md)。
+
 ```text
 campus-pass/
 ├─ src/main/java/       后端业务代码
@@ -128,7 +130,7 @@ USE campus_pass;
 sql/CampusPass.sql
 ```
 
-需要分页和并发测试数据时，再阅读文件开头的准备条件并执行：
+需要演示账号和活动时，再阅读文件开头的准备条件并执行（一次性导入）：
 
 ```text
 sql/CampusPass-test-data.sql

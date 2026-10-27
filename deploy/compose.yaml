@@ -1,0 +1,92 @@
+name: campuspass-full
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请设置管理员密码}
+      MYSQL_DATABASE: campus_pass
+      MYSQL_USER: campuspass_app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请设置应用密码}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../sql/CampusPass.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../sql/CampusPass-test-data.sql:/docker-entrypoint-initdb.d/02-demo-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mysql --protocol=TCP -h 127.0.0.1 -u campuspass_app -D campus_pass -e 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s      
+
+  redis:
+    image: redis:7.4
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5      
+
+  rabbitmq:
+    image: rabbitmq:4.3.6-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?请设置RabbitMQ用户名}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请设置RabbitMQ密码}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VIRTUAL_HOST:?请设置虚拟主机}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s   
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: campuspass-backend:full
+    environment:
+      MYSQL_URL: "jdbc:mysql://mysql:3306/campus_pass?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8"
+      MYSQL_USERNAME: campuspass_app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请设置应用密码}
+
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?请设置RabbitMQ用户名}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?请设置RabbitMQ密码}
+      RABBITMQ_VIRTUAL_HOST: ${RABBITMQ_VIRTUAL_HOST:?请设置虚拟主机}
+
+      CAMPUS_PASS_JWT_SECRET: ${CAMPUS_PASS_JWT_SECRET:?请设置JWT密钥}
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy   
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    image: campuspass-frontend:full
+    ports:
+      - "8082:80"
+    depends_on:
+      backend:
+        condition: service_started              
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
